@@ -23,7 +23,17 @@ const PORT = process.env.PORT || 3000;
 connectDB()
 
 // Middleware
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'", "https://e-commerce-rho-nine-36.vercel.app"],
+            connectSrc: ["'self'", "http://localhost:3000", "https://e-commerce-rho-nine-36.vercel.app"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+        },
+    },
+}));
+
 app.use(cors({
     origin: process.env.CORS_ORIGIN || '*',
     credentials: true,
