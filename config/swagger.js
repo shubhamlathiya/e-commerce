@@ -11,10 +11,10 @@ const options = {
                 name: 'API Support', email: 'support@example.com'
             }
         }, servers: [
-            {
-                url: `http://localhost:${process.env.PORT}`,
-                description: 'Local development server',
-            },
+            // {
+            //     url: `http://localhost:${process.env.PORT}`,
+            //     description: 'Local development server',
+            // },
             {
                 url: 'https://e-commerce-rho-nine-36.vercel.app',
                 description: 'Production server (Vercel)',
@@ -23,7 +23,7 @@ const options = {
         components: {
             securitySchemes: {
                 bearerAuth: {
-                    type: 'http', scheme: 'bearer', bearerFormat: 'JWT'
+                    type: 'https', scheme: 'bearer', bearerFormat: 'JWT'
                 }
             }, schemas: {
                 Error: {
