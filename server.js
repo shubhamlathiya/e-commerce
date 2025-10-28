@@ -42,8 +42,17 @@ app.use(passport.initialize());
 
 
 
-// API Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// // API Documentation
+// app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+//
+
+// ✅ Swagger Docs route (move here)
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+// Example base route
+app.get('/', (req, res) => {
+    res.send('API is running successfully');
+});
 
 
 // Routes
