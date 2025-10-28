@@ -13,12 +13,14 @@ const options = {
         }, servers: [
             {
                 url: `http://localhost:${process.env.PORT}`,
-                description: 'Development server',
-            },    {
-                url: `https://e-commerce-rho-nine-36.vercel.app/`,
-                description: 'Development server',
+                description: 'Local development server',
             },
-        ], components: {
+            {
+                url: 'https://e-commerce-rho-nine-36.vercel.app',
+                description: 'Production server (Vercel)',
+            },
+        ],
+        components: {
             securitySchemes: {
                 bearerAuth: {
                     type: 'http', scheme: 'bearer', bearerFormat: 'JWT'
