@@ -6,9 +6,7 @@ const morgan = require('morgan');
 const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
-const swaggerJsDoc = require('swagger-jsdoc');
 const passport = require('passport');
-const session = require('express-session');
 // Load environment variables
 dotenv.config();
 
@@ -40,20 +38,14 @@ socialAuthConfig();
 
 app.use(passport.initialize());
 
-
-
-// // API Documentation
+// API Documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-//
 
-// ✅ Swagger Docs route (move here)
-// app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Example base route
 app.get('/', (req, res) => {
     res.send('API is running successfully');
 });
-
 
 // Routes
 app.use('/', index);
