@@ -29,6 +29,7 @@ const loyaltyRoutes = require('./offersAndDiscounts/loyaltyRoutes');
 // Checkout & orders
 const cartRoutes = require('./cartManagement/cartRoutes');
 const shippingRoutes = require('././shipping/shippingRoutes');
+const addressRoutes = require('././shipping/addressRoutes')
 const paymentRoutes = require('././payments/paymentRoutes');
 const orderRoutes = require('././orders/orderRoutes');
 const walletRoutes = require('././payments/walletRoutes');
@@ -67,6 +68,7 @@ router.use('/api/loyalty', loyaltyRoutes);
 // Checkout & orders
 router.use('/api/cart', cartRoutes);
 router.use('/api/shipping', shippingRoutes);
+router.use('/api/addresses', addressRoutes);
 router.use('/api/payments', paymentRoutes);
 router.use('/api/orders', orderRoutes);
 router.use('/api/wallet', walletRoutes);

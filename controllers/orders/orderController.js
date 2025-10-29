@@ -6,7 +6,7 @@ const OrderReturn = require('../../models/orders/orderReturnModel');
 const OrderReplacement = require('../../models/orders/orderReplacementModel');
 const NotificationLog = require('../../models/notifications/notificationLogModel');
 const ShippingRule = require('../../models/shipping/shippingRuleModel');
-
+const UserAddress = require('../../models/shipping/userAddressModel');
 /**
  * Create a new order from cart
  */
@@ -17,6 +17,7 @@ exports.createOrder = async (req, res) => {
             cartId,
             paymentMethod,
             shippingAddress,
+            addressId,
             billingAddress = null, // Optional, defaults to shipping address
             notes = ''
         } = req.body;
@@ -39,14 +40,35 @@ exports.createOrder = async (req, res) => {
             });
         }
 
+        // Resolve shipping address if addressId provided
+        let finalShippingAddress = shippingAddress;
+        if (!finalShippingAddress && addressId) {
+            const addr = await UserAddress.findOne({_id: addressId, userId}).lean();
+            if (!addr) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Address not found'
+                });
+            }
+            finalShippingAddress = {
+                name: addr.name,
+                phone: addr.phone,
+                address: addr.address,
+                city: addr.city,
+                state: addr.state,
+                postalCode: addr.pincode,
+                country: addr.country,
+            };
+        }
+
         // Create new order
         const order = new Order({
             userId,
             items: cart.items,
             paymentMethod,
             paymentStatus: paymentMethod.toLowerCase() === 'cod' ? 'cod' : 'pending',
-            shippingAddress,
-            billingAddress: billingAddress || shippingAddress,
+            shippingAddress: finalShippingAddress,
+            billingAddress: billingAddress || finalShippingAddress,
             totals: {
                 subtotal: orderSummary.subtotal,
                 discount: orderSummary.discount,
@@ -297,7 +319,7 @@ exports.updateOrderStatus = async (req, res) => {
 exports.generateOrderSummary = async (req, res) => {
     try {
         const userId = req.user.id;
-        const {cartId, shippingAddress} = req.body;
+        const {cartId, shippingAddress, addressId} = req.body;
 
         // Find the cart
         const cart = await Cart.findOne({_id: cartId, userId});
@@ -318,10 +340,28 @@ exports.generateOrderSummary = async (req, res) => {
         // Calculate subtotal
         const subtotal = cart.cartTotal;
 
+        // Resolve shipping address via addressId if provided
+        let resolvedShippingAddress = shippingAddress;
+        if (!resolvedShippingAddress && addressId) {
+            const addr = await UserAddress.findOne({_id: addressId, userId}).lean();
+            if (!addr) {
+                return res.status(404).json({success: false, message: 'Address not found'});
+            }
+            resolvedShippingAddress = {
+                name: addr.name,
+                phone: addr.phone,
+                address: addr.address,
+                city: addr.city,
+                state: addr.state,
+                postalCode: addr.pincode,
+                country: addr.country,
+            };
+        }
+
         // Calculate shipping cost
         let shippingCost = 0;
-        if (shippingAddress) {
-            const {country, state, postalCode} = shippingAddress;
+        if (resolvedShippingAddress) {
+            const {country, state, postalCode} = resolvedShippingAddress;
 
             // Find applicable shipping rule
             const shippingRule = await ShippingRule.findOne({
