@@ -23,7 +23,7 @@ const options = {
         components: {
             securitySchemes: {
                 bearerAuth: {
-                    type: 'http', scheme: 'bearer', bearerFormat: 'JWT'
+                    type: ['http', 'https'], scheme: 'bearer', bearerFormat: 'JWT'
                 }
             }, schemas: {
                 Error: {
