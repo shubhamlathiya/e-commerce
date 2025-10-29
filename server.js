@@ -7,6 +7,7 @@ const dotenv = require('dotenv');
 const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const passport = require('passport');
+const crypto = require('crypto');
 // Load environment variables
 dotenv.config();
 
@@ -43,6 +44,34 @@ app.use(express.json());
 app.use(express.urlencoded({extended: true}));
 app.use(cookieParser());
 app.use(morgan('dev'));
+
+const SESSION_COOKIE = 'guest_session';
+
+app.use((req, res, next) => {
+    const existing = req.cookies[SESSION_COOKIE];
+    if (!existing) {
+        const sessionId = crypto.randomBytes(16).toString('hex');
+        res.cookie(SESSION_COOKIE, sessionId, {
+            httpOnly: true,
+            sameSite: 'lax',
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        });
+        req.sessionId = sessionId;
+    } else {
+        req.sessionId = existing;
+    }
+    next();
+});
+
+// Quick session test endpoint
+app.get('/session/test', (req, res) => {
+    res.json({
+        ok: true,
+        sessionId: req.sessionId || null,
+        cookie: req.cookies[SESSION_COOKIE] || null,
+    });
+});
 
 socialAuthConfig();
 
