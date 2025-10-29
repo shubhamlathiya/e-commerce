@@ -17,6 +17,21 @@ const stockRoutes = require('././productCatalog/stockRoutes');
 const tagRoutes = require('././productCatalog/tagsRoutes');
 const seoRoutes = require('././productCatalog/seoRoutes');
 const faqRoutes = require('././productCatalog/faqsRoutes');
+const pricingRoutes = require('./productPricingAndTaxation/pricingRoutes');
+const taxRoutes = require('./productPricingAndTaxation/taxRoutes');
+const currencyRoutes = require('./productPricingAndTaxation/currencyRoutes');
+const couponRoutes = require('./offersAndDiscounts/couponsRoutes');
+const autoDiscountRoutes = require('./offersAndDiscounts/autoDiscountRoutes');
+const bogoRoutes = require('./offersAndDiscounts/bogoRoutes');
+const flashSaleRoutes = require('./offersAndDiscounts/flashSaleRoutes');
+const comboRoutes = require('./offersAndDiscounts/comboRoutes');
+const loyaltyRoutes = require('./offersAndDiscounts/loyaltyRoutes');
+// Checkout & orders
+const cartRoutes = require('./cartManagement/cartRoutes');
+const shippingRoutes = require('././shipping/shippingRoutes');
+const paymentRoutes = require('././payments/paymentRoutes');
+const orderRoutes = require('././orders/orderRoutes');
+const walletRoutes = require('././payments/walletRoutes');
 
 
 // Auth routes
@@ -37,6 +52,24 @@ router.use('/api/catalog/tags', tagRoutes);
 router.use('/api/catalog/seo', seoRoutes);
 router.use('/api/catalog/product-faqs', faqRoutes);
 
+// Pricing & tax
+router.use('/api/catalog/pricing', pricingRoutes);
+router.use('/api/catalog/tax', taxRoutes);
+router.use('/api/catalog/currency', currencyRoutes);
+// Promotions
+router.use('/api/promotions/coupons', couponRoutes);
+router.use('/api/promotions/auto-discount', autoDiscountRoutes);
+router.use('/api/promotions/bogo', bogoRoutes);
+router.use('/api/promotions/flash-sales', flashSaleRoutes);
+router.use('/api/promotions/combos', comboRoutes);
+// Loyalty
+router.use('/api/loyalty', loyaltyRoutes);
+// Checkout & orders
+router.use('/api/cart', cartRoutes);
+router.use('/api/shipping', shippingRoutes);
+router.use('/api/payments', paymentRoutes);
+router.use('/api/orders', orderRoutes);
+router.use('/api/wallet', walletRoutes);
 // Admin routes
 router.use('/api/admin', adminRoutes);
 
