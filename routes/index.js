@@ -82,7 +82,7 @@ router.use('/api/marketing', marketingRoutes);
 router.use('/api/analytics', analyticsRoutes);
 router.use('/api/settings', settingsRoutes);
 router.use('/api/support', supportRoutes);
-// router.use('/api/rma/refunds', refundRoutes);
+router.use('/api/rma/refunds', refundRoutes);
 
 // Admin routes
 router.use('/api/admin', adminRoutes);
