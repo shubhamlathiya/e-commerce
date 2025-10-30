@@ -34,6 +34,11 @@ const paymentRoutes = require('././payments/paymentRoutes');
 const orderRoutes = require('././orders/orderRoutes');
 const walletRoutes = require('././payments/walletRoutes');
 
+const marketingRoutes = require('././marketing/marketingRoutes');
+const analyticsRoutes = require('././analytics/analyticsRoutes');
+const settingsRoutes = require('././settings/settingsRoutes');
+const supportRoutes = require('././support/supportRoutes');
+const refundRoutes = require('././orders/refundRoutes');
 
 // Auth routes
 router.use('/api/auth', authRoutes);
@@ -72,6 +77,13 @@ router.use('/api/addresses', addressRoutes);
 router.use('/api/payments', paymentRoutes);
 router.use('/api/orders', orderRoutes);
 router.use('/api/wallet', walletRoutes);
+
+router.use('/api/marketing', marketingRoutes);
+router.use('/api/analytics', analyticsRoutes);
+router.use('/api/settings', settingsRoutes);
+router.use('/api/support', supportRoutes);
+// router.use('/api/rma/refunds', refundRoutes);
+
 // Admin routes
 router.use('/api/admin', adminRoutes);
 

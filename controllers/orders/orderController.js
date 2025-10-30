@@ -7,6 +7,8 @@ const OrderReplacement = require('../../models/orders/orderReplacementModel');
 const NotificationLog = require('../../models/notifications/notificationLogModel');
 const ShippingRule = require('../../models/shipping/shippingRuleModel');
 const UserAddress = require('../../models/shipping/userAddressModel');
+const Refund = require('../../models/orders/refundModel');
+
 /**
  * Create a new order from cart
  */
@@ -439,7 +441,7 @@ exports.generateOrderSummary = async (req, res) => {
 exports.requestReturn = async (req, res) => {
     try {
         const userId = req.user.id;
-        const {orderId, items, reason} = req.body;
+        const {orderId, items, reason, resolution} = req.body;
 
         // Validate order belongs to user
         const order = await Order.findOne({_id: orderId, userId});
@@ -463,6 +465,8 @@ exports.requestReturn = async (req, res) => {
             orderId,
             userId,
             items,
+            reason: reason || '',
+            resolution: resolution && ['refund', 'replacement'].includes(resolution) ? resolution : 'refund',
             status: 'requested'
         });
 
@@ -558,7 +562,7 @@ exports.requestReplacement = async (req, res) => {
 exports.processReturnReplacement = async (req, res) => {
     try {
         const {id, type} = req.params;
-        const {status, comment} = req.body;
+        const {status, comment, mode, amount} = req.body;
         const adminId = req.user.id;
 
         // Validate type
@@ -598,6 +602,29 @@ exports.processReturnReplacement = async (req, res) => {
 
         request.status = status;
         await request.save();
+
+        // If return is marked refunded, record refund transaction
+        if (type === 'return' && status === 'refunded') {
+            const refundAmount = typeof amount === 'number' && amount >= 0
+                ? amount
+                : request.refundAmount || 0;
+            const refundMode = mode && ['wallet', 'bank'].includes(mode) ? mode : 'wallet';
+            // persist refund record for audit
+            await Refund.create({
+                returnId: request._id,
+                userId: request.userId,
+                orderId: request.orderId,
+                mode: refundMode,
+                amount: refundAmount,
+                transactionId: `RMA${Date.now()}${Math.floor(Math.random() * 1000)}`,
+                status: 'completed'
+            });
+            // annotate admin note and processedAt on return
+            request.adminNote = comment || request.adminNote;
+            request.refundAmount = refundAmount;
+            request.processedAt = new Date();
+            await request.save();
+        }
 
         // Create order history entry
         const orderHistory = new OrderHistory({

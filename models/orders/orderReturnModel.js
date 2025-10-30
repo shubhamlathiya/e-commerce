@@ -16,7 +16,7 @@ const ReturnItemSchema = new Schema({
         type: String,
         required: true
     }
-});
+}, { _id: false });
 
 /**
  * @swagger
@@ -85,6 +85,31 @@ const OrderReturnSchema = new Schema({
         required: true
     },
     items: [ReturnItemSchema],
+    reason: {
+        type: String,
+        default: ''
+    },
+    resolution: {
+        type: String,
+        enum: ['refund', 'replacement'],
+        default: 'refund'
+    },
+    refundAmount: {
+        type: Number,
+        default: 0
+    },
+    adminNote: {
+        type: String,
+        default: ''
+    },
+    requestDate: {
+        type: Date,
+        default: Date.now
+    },
+    processedAt: {
+        type: Date,
+        default: null
+    },
     status: {
         type: String,
         enum: ['requested', 'approved', 'rejected', 'refunded'],
@@ -103,6 +128,10 @@ const OrderReturnSchema = new Schema({
 // Update the updatedAt field on save
 OrderReturnSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
+    // auto-set processedAt when moved to refunded
+    if (this.isModified('status') && this.status === 'refunded' && !this.processedAt) {
+        this.processedAt = Date.now();
+    }
     next();
 });
 

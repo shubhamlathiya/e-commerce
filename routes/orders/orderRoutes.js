@@ -46,7 +46,8 @@ router.post('/summary',
     authenticateJWT,
     [
         check('cartId').isMongoId().withMessage('Valid cart ID is required'),
-        check('shippingAddress').optional().isObject()
+        check('shippingAddress').optional().isObject(),
+        check('addressId').optional().isMongoId()
     ],
     orderController.generateOrderSummary
 );
@@ -106,7 +107,8 @@ router.post('/',
     [
         check('cartId').isMongoId().withMessage('Valid cart ID is required'),
         check('paymentMethod').isString().withMessage('Payment method is required'),
-        check('shippingAddress').isObject().withMessage('Shipping address is required'),
+        check('shippingAddress').optional().isObject(),
+        check('addressId').optional().isMongoId(),
         check('billingAddress').optional().isObject(),
         check('notes').optional().isString()
     ],
@@ -202,7 +204,8 @@ router.post('/return',
     [
         check('orderId').isMongoId().withMessage('Valid order ID is required'),
         check('items').isArray().withMessage('Items array is required'),
-        check('reason').optional().isString()
+        check('reason').optional().isString(),
+        check('resolution').optional().isIn(['refund', 'replacement']).withMessage('Resolution must be refund or replacement')
     ],
     orderController.requestReturn
 );
@@ -371,7 +374,9 @@ router.put('/admin/:type/:id',
     isAdmin,
     [
         check('status').isString().withMessage('Status is required'),
-        check('comment').optional().isString()
+        check('comment').optional().isString(),
+        check('mode').optional().isIn(['wallet', 'bank']),
+        check('amount').optional().isNumeric()
     ],
     orderController.processReturnReplacement
 );
