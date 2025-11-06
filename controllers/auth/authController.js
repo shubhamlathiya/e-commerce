@@ -451,9 +451,9 @@ exports.login = async (req, res) => {
 
 
                 if (method === 'email') {
-                    await send2FAEmail(user.email, otp);
+                    send2FAEmail(user.email, otp);
                 } else if (method === 'phone') {
-                    await send2FASMS(user.phone, otp);
+                    send2FASMS(user.phone, otp);
                 }
 
                 return res.status(200).json({

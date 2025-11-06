@@ -262,6 +262,9 @@ router.post('/disable', authenticateJWT, [
     body('password').notEmpty().withMessage('Password is required')
 ], twoFAController.disable2FA);
 
+// Get current 2FA status
+router.get('/status', authenticateJWT, twoFAController.get2FAStatus);
+
 /**
  * @swagger
  * /api/auth/2fa/authenticate:

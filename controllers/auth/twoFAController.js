@@ -405,3 +405,29 @@ exports.authenticate2FA = async (req, res) => {
         });
     }
 };
+
+// Get current 2FA status for authenticated user
+exports.get2FAStatus = async (req, res) => {
+    try {
+        const userId = req.user.id;
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ success: false, message: 'User not found' });
+        }
+        const twoFA = user.profile?.twoFactorAuth || {};
+        return res.status(200).json({
+            success: true,
+            data: {
+                enabled: !!twoFA.enabled,
+                method: twoFA.method || null,
+            },
+        });
+    } catch (error) {
+        console.error('Get 2FA status error:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'An error occurred while fetching 2FA status',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+};
