@@ -8,6 +8,7 @@ const cookieParser = require('cookie-parser');
 const swaggerUi = require('swagger-ui-express');
 const passport = require('passport');
 const crypto = require('crypto');
+const path = require('path');
 // Load environment variables
 dotenv.config();
 
@@ -88,7 +89,7 @@ app.get('/', (req, res) => {
 
 // Routes
 app.use('/', index);
-
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.status(200).json({status: 'ok', message: 'Service is running'});

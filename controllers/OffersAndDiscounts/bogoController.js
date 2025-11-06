@@ -36,7 +36,7 @@ exports.listBogo = async (req, res) => {
         }
 
         const rules = await BuyXGetY.find(query).sort({startDate: -1}).lean();
-
+        console.log(rules)
         return res.status(200).json({
             success: true,
             message: 'BOGO rules fetched successfully',

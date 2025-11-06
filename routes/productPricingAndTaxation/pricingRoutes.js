@@ -96,7 +96,7 @@ router.put(
  *       404:
  *         description: Pricing not found
  */
-router.get('/product', [query('productId').isMongoId(), query('variantId').optional().isMongoId()], validate, pricingController.getProductPricing);
+router.get('/product', [query('productId').optional().isMongoId(), query('variantId').optional().isMongoId()], validate, pricingController.getProductPricing);
 
 /**
  * @swagger

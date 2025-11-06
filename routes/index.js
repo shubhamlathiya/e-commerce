@@ -59,15 +59,15 @@ router.use('/api/catalog/seo', seoRoutes);
 router.use('/api/catalog/product-faqs', faqRoutes);
 
 // Pricing & tax
-router.use('/api/catalog/pricing', pricingRoutes);
-router.use('/api/catalog/tax', taxRoutes);
+router.use('/api/pricing', pricingRoutes);
+router.use('/api/tax', taxRoutes);
 router.use('/api/catalog/currency', currencyRoutes);
 // Promotions
 router.use('/api/promotions/coupons', couponRoutes);
 router.use('/api/promotions/auto-discount', autoDiscountRoutes);
 router.use('/api/promotions/bogo', bogoRoutes);
 router.use('/api/promotions/flash-sales', flashSaleRoutes);
-router.use('/api/promotions/combos', comboRoutes);
+router.use('/api/promotions/combo', comboRoutes);
 // Loyalty
 router.use('/api/loyalty', loyaltyRoutes);
 // Checkout & orders

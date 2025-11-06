@@ -2,6 +2,7 @@ const express = require('express');
 const { body, param, query } = require('express-validator');
 const brandController = require('../../controllers/productCatalog/brandController');
 const { authenticateJWT, isAdmin } = require('../../middleware/authMiddleware');
+const {productImageUpload, singleImageUpload} = require("../../utils/upload");
 
 const router = express.Router();
 
@@ -124,7 +125,7 @@ router.get('/:id', [param('id').isMongoId()], brandController.getBrand);
  *       500:
  *         description: Server error
  */
-router.post('/', authenticateJWT, isAdmin, [
+router.post('/', authenticateJWT, isAdmin, singleImageUpload('logo', 'brands'), [
     body('name').isString().notEmpty(),
     body('slug').optional().isString(),
     body('logo').optional().isString(),

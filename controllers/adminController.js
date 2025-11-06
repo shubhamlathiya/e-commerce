@@ -19,7 +19,7 @@ exports.getAllUsers = async (req, res) => {
             .sort({createdAt: -1});
 
         const totalUsers = await User.countDocuments();
-
+        console.log(users)
         return res.status(200).json({
             success: true,
             users,

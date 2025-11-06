@@ -33,7 +33,7 @@ exports.listCombos = async (req, res) => {
         const combos = await ComboOffer.find(query)
             .sort({createdAt: -1})
             .lean();
-
+        // console.log(combos)
         return res.status(200).json({
             success: true,
             message: 'Combo offers fetched successfully',

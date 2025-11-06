@@ -1,17 +1,18 @@
 const express = require('express');
 const router = express.Router();
-const { body, param, query } = require('express-validator');
-const { authenticateJWT, isAdmin } = require('../../middleware/authMiddleware');
+const {body, param, query} = require('express-validator');
+const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
 const productController = require('../../controllers/productCatalog/productController');
 const validate = require('../../utils/productCatalog/validate');
-
+const {singleImageUpload, multipleImageUpload, combinedImageUpload} = require("../../utils/upload");
+const multer = require("multer");
+const upload = multer();
 /**
  * @swagger
  * tags:
  *   - name: Catalog - Products
  *     description: Manage products in the catalog
  */
-
 
 /**
  * @swagger
@@ -58,6 +59,11 @@ const validate = require('../../utils/productCatalog/validate');
  *           type: string
  *           enum: [simple, variable]
  *         description: Filter by product type
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: Search in product titles and descriptions
  *     responses:
  *       200:
  *         description: Paginated list of products
@@ -67,18 +73,18 @@ const validate = require('../../utils/productCatalog/validate');
 router.get(
     '/',
     [
-        query('page').optional().isInt({ min: 1 }),
-        query('limit').optional().isInt({ min: 1, max: 200 }),
+        query('page').optional().isInt({min: 1}),
+        query('limit').optional().isInt({min: 1, max: 200}),
         query('brandId').optional().isMongoId(),
         query('categoryId').optional().isMongoId(),
         query('status').optional().isBoolean(),
         query('isFeatured').optional().isBoolean(),
         query('type').optional().isIn(['simple', 'variable']),
+        query('search').optional().isString(),
     ],
     validate,
     productController.listProducts
 );
-
 
 /**
  * @swagger
@@ -103,7 +109,6 @@ router.get(
  */
 router.get('/:id', [param('id').isMongoId()], validate, productController.getProduct);
 
-
 /**
  * @swagger
  * /api/catalog/products:
@@ -115,13 +120,18 @@ router.get('/:id', [param('id').isMongoId()], validate, productController.getPro
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
+ *             required:
+ *               - title
  *             properties:
  *               title:
  *                 type: string
  *                 description: Product title
+ *               description:
+ *                 type: string
+ *                 description: Product description
  *               slug:
  *                 type: string
  *                 description: Product slug (auto-generated if not provided)
@@ -136,18 +146,28 @@ router.get('/:id', [param('id').isMongoId()], validate, productController.getPro
  *               type:
  *                 type: string
  *                 enum: [simple, variable]
+ *                 default: simple
  *                 description: Product type
  *               sku:
  *                 type: string
  *                 description: Product SKU
  *               thumbnail:
  *                 type: string
- *                 description: Thumbnail image URL
+ *                 format: binary
+ *                 description: Thumbnail image file
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Product gallery images
  *               status:
  *                 type: boolean
+ *                 default: true
  *                 description: Active or inactive status
  *               isFeatured:
  *                 type: boolean
+ *                 default: false
  *                 description: Mark product as featured
  *               tags:
  *                 type: array
@@ -164,26 +184,22 @@ router.get('/:id', [param('id').isMongoId()], validate, productController.getPro
  *       500:
  *         description: Server error
  */
+// router.post(
+//     "/",
+//     // authenticateJWT,
+//     // isAdmin,
+//     singleImageUpload("thumbnail", "products"),
+//     upload.any(),
+//     // multipleImageUpload("images", "products", 10),
+//     productController.createProduct
+// );
 router.post(
-    '/',
-    authenticateJWT,
-    isAdmin,
-    [
-        body('title').isString().notEmpty(),
-        body('slug').optional().isString(),
-        body('brandId').optional().isMongoId(),
-        body('categoryIds').optional().isArray(),
-        body('type').optional().isIn(['simple', 'variable']),
-        body('sku').optional().isString(),
-        body('thumbnail').optional().isString(),
-        body('status').optional().isBoolean(),
-        body('isFeatured').optional().isBoolean(),
-        body('tags').optional().isArray(),
-    ],
-    validate,
+    "/",
+    // authenticateJWT,
+    // isAdmin,
+    combinedImageUpload("products"),
     productController.createProduct
 );
-
 
 /**
  * @swagger
@@ -203,11 +219,13 @@ router.post(
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             properties:
  *               title:
+ *                 type: string
+ *               description:
  *                 type: string
  *               slug:
  *                 type: string
@@ -224,6 +242,12 @@ router.post(
  *                 type: string
  *               thumbnail:
  *                 type: string
+ *                 format: binary
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
  *               status:
  *                 type: boolean
  *               isFeatured:
@@ -248,23 +272,26 @@ router.patch(
     '/:id',
     authenticateJWT,
     isAdmin,
+    singleImageUpload("thumbnail", "products"),
+    multipleImageUpload("images", "products", 10),
     [
         param('id').isMongoId(),
-        body('title').optional().isString(),
-        body('slug').optional().isString(),
+        body('title').optional().isString().isLength({min: 3, max: 100}),
+        body('description').optional().isString().isLength({max: 2000}),
+        body('slug').optional().isString().matches(/^[a-z0-9-]+$/),
         body('brandId').optional().isMongoId(),
         body('categoryIds').optional().isArray(),
+        body('categoryIds.*').optional().isMongoId(),
         body('type').optional().isIn(['simple', 'variable']),
         body('sku').optional().isString(),
-        body('thumbnail').optional().isString(),
         body('status').optional().isBoolean(),
         body('isFeatured').optional().isBoolean(),
         body('tags').optional().isArray(),
+        body('tags.*').optional().isString(),
     ],
     validate,
     productController.updateProduct
 );
-
 
 /**
  * @swagger
@@ -294,4 +321,3 @@ router.patch(
 router.delete('/:id', authenticateJWT, isAdmin, [param('id').isMongoId()], validate, productController.deleteProduct);
 
 module.exports = router;
-

@@ -31,14 +31,34 @@ exports.upsertProductPricing = async (req, res) => {
 
 exports.getProductPricing = async (req, res) => {
     try {
-        const {productId, variantId} = req.query;
-        const q = {productId};
-        if (variantId) q.variantId = variantId; else q.variantId = null;
-        const doc = await ProductPricing.findOne(q).lean();
-        if (!doc) return res.status(404).json({message: 'Pricing not found'});
+        const { productId, variantId } = req.query;
+
+        // If no productId provided → return all pricing records
+        if (!productId) {
+            const allPricing = await ProductPricing.find().lean();
+            return res.json(allPricing);
+        }
+
+        // Build query filter
+        const query = { productId };
+        if (variantId) query.variantId = variantId;
+        else query.variantId = null;
+
+        const doc = await ProductPricing.findOne(query).lean();
+
+        // If not found, return all pricing data for that product
+        if (!doc) {
+            const allForProduct = await ProductPricing.find({ productId }).lean();
+            if (!allForProduct.length)
+                return res.status(404).json({ message: "No pricing found for this product" });
+            return res.json(allForProduct);
+        }
+
+        // Found a specific record
         res.json(doc);
     } catch (err) {
-        res.status(400).json({message: err.message});
+        console.error("Get product pricing error:", err);
+        res.status(500).json({ message: err.message || "Server error" });
     }
 };
 

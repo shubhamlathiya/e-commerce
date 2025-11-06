@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/auth/userModel');
+const {Logform} = require("winston");
 
 /**
  * Middleware to authenticate JWT token
@@ -22,10 +23,11 @@ exports.authenticateJWT = async (req, res, next) => {
 
         // Verify token
         const decoded = jwt.verify(token, process.env.JWT_ACCESS_SECRET);
-        console.log(decoded);
+        // console.log(decoded);
         // Check if token is expired
         const currentTimestamp = Math.floor(Date.now() / 1000);
         if (decoded.exp && decoded.exp < currentTimestamp) {
+            console.log(decoded.exp);
             return res.status(401).json({
                 success: false,
                 message: 'Token has expired'

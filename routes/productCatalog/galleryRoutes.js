@@ -4,6 +4,7 @@ const {body, param} = require('express-validator');
 const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
 const productGalleryController = require('../../controllers/productCatalog/productGalleryController');
 const validate = require('../../utils/productCatalog/validate');
+const {multipleImageUpload} = require("../../utils/upload");
 
 /**
  * @swagger
@@ -11,7 +12,6 @@ const validate = require('../../utils/productCatalog/validate');
  *   - name: Catalog - Product Gallery
  *     description: Manage product gallery images
  */
-
 
 /**
  * @swagger
@@ -34,15 +34,13 @@ const validate = require('../../utils/productCatalog/validate');
  *       500:
  *         description: Server error
  */
-
 router.get('/:productId', [param('productId').isMongoId()], validate, productGalleryController.getGallery);
-
 
 /**
  * @swagger
  * /api/catalog/product-gallery/{productId}:
- *   put:
- *     summary: Set or update product gallery (Admin only)
+ *   post:
+ *     summary: Add images to product gallery (Admin only)
  *     tags: [Catalog - Product Gallery]
  *     security:
  *       - bearerAuth: []
@@ -56,7 +54,7 @@ router.get('/:productId', [param('productId').isMongoId()], validate, productGal
  *     requestBody:
  *       required: true
  *       content:
- *         application/json:
+ *         multipart/form-data:
  *           schema:
  *             type: object
  *             required:
@@ -64,31 +62,13 @@ router.get('/:productId', [param('productId').isMongoId()], validate, productGal
  *             properties:
  *               images:
  *                 type: array
- *                 description: List of image objects for the product
  *                 items:
- *                   type: object
- *                   properties:
- *                     url:
- *                       type: string
- *                       description: Image URL
- *                     alt:
- *                       type: string
- *                       description: Alternative text for accessibility
- *           example:
- *             images:
- *               - url: "https://cdn.example.com/products/671f44e2b12a34567890abcd/image1.jpg"
- *                 alt: "Front view of product"
- *               - url: "https://cdn.example.com/products/671f44e2b12a34567890abcd/image2.jpg"
- *                 alt: "Side angle"
- *               - url: "https://cdn.example.com/products/671f44e2b12a34567890abcd/image3.jpg"
- *                 alt: "Back view"
- *               - url: "https://cdn.example.com/products/671f44e2b12a34567890abcd/image4.jpg"
- *                 alt: "Top close-up"
- *               - url: "https://cdn.example.com/products/671f44e2b12a34567890abcd/image5.jpg"
- *                 alt: "Packaging photo"
+ *                   type: string
+ *                   format: binary
+ *                 description: Gallery images to upload
  *     responses:
  *       200:
- *         description: Product gallery updated successfully
+ *         description: Images added to gallery successfully
  *       400:
  *         description: Validation error
  *       401:
@@ -98,13 +78,123 @@ router.get('/:productId', [param('productId').isMongoId()], validate, productGal
  *       500:
  *         description: Server error
  */
-router.put('/:productId', authenticateJWT, isAdmin, [param('productId').isMongoId(), body('images').isArray()], validate, productGalleryController.setGallery);
+router.post(
+    '/:productId',
+    authenticateJWT,
+    isAdmin,
+    multipleImageUpload('images', 'products', 10),
+    [
+        param('productId').isMongoId(),
+        body('altTexts').optional().isArray(),
+        body('altTexts.*').optional().isString().isLength({ max: 255 })
+    ],
+    validate,
+    productGalleryController.addGalleryImages
+);
+
+/**
+ * @swagger
+ * /api/catalog/product-gallery/{productId}:
+ *   put:
+ *     summary: Replace all gallery images (Admin only)
+ *     tags: [Catalog - Product Gallery]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Product ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: New gallery images (replaces all existing)
+ *     responses:
+ *       200:
+ *         description: Gallery images replaced successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Server error
+ */
+router.put(
+    '/:productId',
+    authenticateJWT,
+    isAdmin,
+    multipleImageUpload('images', 'products', 10),
+    [
+        param('productId').isMongoId()
+    ],
+    validate,
+    productGalleryController.replaceGallery
+);
+
+/**
+ * @swagger
+ * /api/catalog/product-gallery/{productId}/images/{imageIndex}:
+ *   delete:
+ *     summary: Remove specific image from gallery (Admin only)
+ *     tags: [Catalog - Product Gallery]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: productId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Product ID
+ *       - in: path
+ *         name: imageIndex
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           minimum: 0
+ *         description: Index of the image to remove
+ *     responses:
+ *       200:
+ *         description: Image removed successfully
+ *       400:
+ *         description: Invalid image index
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Product or image not found
+ *       500:
+ *         description: Server error
+ */
+router.delete(
+    '/:productId/images/:imageIndex',
+    authenticateJWT,
+    isAdmin,
+    [
+        param('productId').isMongoId(),
+        param('imageIndex').isInt({ min: 0 })
+    ],
+    validate,
+    productGalleryController.removeGalleryImage
+);
 
 /**
  * @swagger
  * /api/catalog/product-gallery/{productId}:
  *   delete:
- *     summary: Delete product gallery (Admin only)
+ *     summary: Delete entire product gallery (Admin only)
  *     tags: [Catalog - Product Gallery]
  *     security:
  *       - bearerAuth: []
@@ -125,7 +215,13 @@ router.put('/:productId', authenticateJWT, isAdmin, [param('productId').isMongoI
  *       500:
  *         description: Server error
  */
-router.delete('/:productId', authenticateJWT, isAdmin, [param('productId').isMongoId()], validate, productGalleryController.deleteGallery);
+router.delete(
+    '/:productId',
+    authenticateJWT,
+    isAdmin,
+    [param('productId').isMongoId()],
+    validate,
+    productGalleryController.deleteGallery
+);
 
 module.exports = router;
-

@@ -1,5 +1,8 @@
 const { validationResult } = require('express-validator');
 const Brand = require('../../models/productCatalog/brandModel');
+const { processImage, UPLOAD_DIR } = require("../../utils/upload"); // your upload helper
+const fs = require("fs");
+const path = require("path");
 
 const slugify = (text) =>
     text.toString().toLowerCase().trim().replace(/\s+/g, '-').replace(/&/g, '-and-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-');
@@ -10,18 +13,82 @@ exports.createBrand = async (req, res) => {
         if (!errors.isEmpty()) {
             return res.status(400).json({ success: false, errors: errors.array() });
         }
-        console.log(req.body)
-        const { name, slug, logo, description, website, status = true, isFeatured = false } = req.body;
+
+        const {
+            name,
+            slug,
+            logo, // may come as URL
+            description,
+            website,
+            status = true,
+            isFeatured = false,
+        } = req.body;
 
         const finalSlug = slug || slugify(name);
         const exists = await Brand.findOne({ slug: finalSlug });
-        if (exists) return res.status(409).json({ success: false, message: 'Slug already exists' });
+        if (exists) {
+            return res.status(409).json({ success: false, message: "Slug already exists" });
+        }
 
-        const brand = await Brand.create({ name, slug: finalSlug, logo, description, website, status, isFeatured });
-        return res.status(201).json({ success: true, data: brand });
+        let finalLogoPath = null;
+        let processedImageData = null;
+        const brandUploadPath = path.join(UPLOAD_DIR, "brands");
+
+        // ✅ Case 1: File uploaded via multipart form (req.file)
+        if (req.file) {
+            processedImageData = await processImage(req.file, "brands");
+            finalLogoPath = processedImageData.original;
+        }
+
+        // ✅ Case 2: Logo is a valid external URL
+        else if (logo && /^https?:\/\/.+/i.test(logo)) {
+            const fileExt = path.extname(new URL(logo).pathname) || ".jpg";
+            const fileName = `brand-${Date.now()}${fileExt}`;
+            const filePath = path.join(brandUploadPath, fileName);
+
+            // Ensure folder exists
+            if (!fs.existsSync(brandUploadPath)) fs.mkdirSync(brandUploadPath, { recursive: true });
+
+            const response = await axios.get(logo, { responseType: "arraybuffer" });
+            fs.writeFileSync(filePath, response.data);
+
+            processedImageData = await processImage({ path: filePath, filename: fileName }, "brands");
+            finalLogoPath = processedImageData.original;
+        }
+
+        // ✅ Case 3: Logo provided as plain text (fallback)
+        else if (logo && !/^blob:/i.test(logo)) {
+            finalLogoPath = logo.trim();
+        }
+
+        // Create brand record
+        const brand = await Brand.create({
+            name,
+            slug: finalSlug,
+            logo: finalLogoPath,
+            description,
+            website,
+            status,
+            isFeatured,
+        });
+
+        return res.status(201).json({
+            success: true,
+            message: "Brand created successfully",
+            data: brand,
+        });
     } catch (error) {
-        console.error('Create brand error:', error);
-        return res.status(500).json({ success: false, message: 'Server error' });
+        console.error("Create brand error:", error);
+
+        // Try cleaning up temporary upload if available
+        if (req.file?.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Server error while creating brand",
+        });
     }
 };
 
