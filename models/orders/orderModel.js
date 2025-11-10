@@ -194,14 +194,33 @@ OrderSchema.pre('save', function(next) {
     next();
 });
 
-// Generate unique order number before saving
-OrderSchema.pre('save', async function(next) {
-    if (!this.orderNumber) {
-        // Generate order number with prefix ORD followed by timestamp and random digits
-        const timestamp = new Date().getTime().toString().slice(-6);
-        const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-        this.orderNumber = `ORD${timestamp}${random}`;
-    }
+// Generate unique order number BEFORE validation so required constraint passes
+OrderSchema.pre('validate', async function (next) {
+    if (this.orderNumber) return next();
+
+    // Format: ORD-YYYYMMDD-HHMMSS-XXXX (random 4 digits)
+    const now = new Date();
+    const yyyy = now.getFullYear();
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const dd = String(now.getDate()).padStart(2, '0');
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mi = String(now.getMinutes()).padStart(2, '0');
+    const ss = String(now.getSeconds()).padStart(2, '0');
+
+    let candidate;
+    let attempts = 0;
+    do {
+        const rand = Math.floor(1000 + Math.random() * 9000); // 4 digits
+        candidate = `ORD-${yyyy}${mm}${dd}-${hh}${mi}${ss}-${rand}`;
+        // Guard against extremely rare collisions with unique index
+        // Use this.constructor to query the same model inside hooks
+        // eslint-disable-next-line no-await-in-loop
+        const exists = await this.constructor.exists({ orderNumber: candidate });
+        if (!exists) break;
+        attempts += 1;
+    } while (attempts < 3);
+
+    this.orderNumber = candidate;
     next();
 });
 

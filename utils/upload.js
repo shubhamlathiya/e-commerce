@@ -241,3 +241,41 @@ module.exports = {
     deleteUploadedImage,
     combinedImageUpload
 };
+
+// Upload handler for categories: supports 'image' and 'icon' fields
+// Sets req.processedCategoryImage and req.processedCategoryIcon when present
+const categoryMediaUpload = () => {
+    const upload = multer({
+        storage: getStorage('categories'),
+        fileFilter,
+        limits: { fileSize: 5 * 1024 * 1024 },
+    }).fields([
+        { name: 'image', maxCount: 1 },
+        { name: 'icon', maxCount: 1 },
+    ]);
+
+    return (req, res, next) => {
+        upload(req, res, async (err) => {
+            if (err) {
+                return res.status(400).json({ success: false, message: err.message });
+            }
+
+            try {
+                if (req.files?.image?.[0]) {
+                    const processed = await processImage(req.files.image[0], 'categories');
+                    req.processedCategoryImage = processed;
+                }
+                if (req.files?.icon?.[0]) {
+                    const processedIcon = await processImage(req.files.icon[0], 'categories');
+                    req.processedCategoryIcon = processedIcon;
+                }
+                next();
+            } catch (error) {
+                console.error('Category media processing error:', error);
+                return res.status(500).json({ success: false, message: 'Error processing category media' });
+            }
+        });
+    };
+};
+
+module.exports.categoryMediaUpload = categoryMediaUpload;

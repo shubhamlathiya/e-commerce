@@ -25,21 +25,59 @@ const PORT = process.env.PORT || 3000;
 connectDB()
 
 // Middleware
-app.use(helmet({
-    contentSecurityPolicy: {
-        directives: {
-            defaultSrc: ["'self'", "https://e-commerce-rho-nine-36.vercel.app"],
-            connectSrc: ["'self'", "http://localhost:3000", "https://e-commerce-rho-nine-36.vercel.app"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-        },
-    },
+// app.use(cors({
+//     origin: ["http://localhost:3000"], // or your deployed frontend domain
+//     credentials: true,
+// }));
+app.use(cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-app.use(cors({
-    origin: process.env.CORS_ORIGIN || '*',
-    credentials: true,
+app.use(helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }, // ✅ important for <img> tags
+    contentSecurityPolicy: false, // ✅ disable strict CSP for development
 }));
+// Secure headers and allow local images
+// app.use(helmet({
+//     contentSecurityPolicy: {
+//         directives: {
+//             defaultSrc: ["'self'"],
+//             imgSrc: [
+//                 "'self'",
+//                 "data:",
+//                 "blob:",
+//                 "http://localhost:8000",
+//                 "http://localhost:3000",
+//                 "https://e-commerce-rho-nine-36.vercel.app"
+//             ],
+//             connectSrc: [
+//                 "'self'",
+//                 "http://localhost:3000",
+//                 "https://e-commerce-rho-nine-36.vercel.app"
+//             ],
+//             scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+//             styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+//         },
+//     },
+// }));
+// Allow images from ANY origin in CSP
+app.use(
+    helmet({
+        crossOriginResourcePolicy: false, // disables blocking external origins
+        contentSecurityPolicy: {
+            useDefaults: true,
+            directives: {
+                defaultSrc: ["*"],
+                imgSrc: ["*", "data:", "blob:"],
+                connectSrc: ["*"],
+                scriptSrc: ["*", "'unsafe-inline'"],
+                styleSrc: ["*", "'unsafe-inline'"],
+            },
+        },
+    })
+);
 
 app.use(express.json());
 app.use(express.urlencoded({extended: true}));

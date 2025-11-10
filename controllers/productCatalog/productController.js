@@ -31,9 +31,25 @@ exports.createProduct = async (req, res) => {
             tags = [],
         } = req.body;
 
-        // Parse array fields
-        const parsedCategoryIds = Array.isArray(categoryIds) ? categoryIds :
-            (categoryIds ? JSON.parse(categoryIds) : []);
+        let parsedCategoryIds = [];
+
+        if (Array.isArray(categoryIds)) {
+            parsedCategoryIds = categoryIds;
+        } else if (typeof categoryIds === 'string') {
+            // Try parsing only if it looks like JSON (starts with [ or {)
+            if (categoryIds.trim().startsWith('[') || categoryIds.trim().startsWith('{')) {
+                try {
+                    parsedCategoryIds = JSON.parse(categoryIds);
+                } catch (err) {
+                    parsedCategoryIds = [categoryIds]; // fallback to single ID
+                }
+            } else {
+                parsedCategoryIds = [categoryIds]; // plain string ID
+            }
+        }
+        console.log("hy")
+
+        let parsedTags = []
 
         if (Array.isArray(tags)) {
             parsedTags = tags;
@@ -44,6 +60,7 @@ exports.createProduct = async (req, res) => {
                 parsedTags = [tags]; // if it's just a plain string like "hy"
             }
         }
+        console.log("hy1")
 
         const productSlug = slug || slugify(title);
 
@@ -64,7 +81,7 @@ exports.createProduct = async (req, res) => {
                 message: "Product with this slug already exists"
             });
         }
-
+        console.log("hy2")
         // Check for duplicate SKU
         if (sku) {
             const existingSku = await Product.findOne({ sku });
@@ -84,7 +101,7 @@ exports.createProduct = async (req, res) => {
                 });
             }
         }
-
+        console.log("hy4")
         // Validate brand
         if (brandId) {
             const brandExists = await Brand.findById(brandId);

@@ -73,7 +73,7 @@ router.use('/api/loyalty', loyaltyRoutes);
 // Checkout & orders
 router.use('/api/cart', cartRoutes);
 router.use('/api/shipping', shippingRoutes);
-router.use('/api/addresses', addressRoutes);
+router.use('/api/address', addressRoutes);
 router.use('/api/payments', paymentRoutes);
 router.use('/api/orders', orderRoutes);
 router.use('/api/wallet', walletRoutes);
@@ -82,7 +82,7 @@ router.use('/api/marketing', marketingRoutes);
 router.use('/api/analytics', analyticsRoutes);
 router.use('/api/settings', settingsRoutes);
 router.use('/api/support', supportRoutes);
-router.use('/api/rma/refunds', refundRoutes);
+router.use('/api/refunds', refundRoutes);
 
 // Admin routes
 router.use('/api/admin', adminRoutes);

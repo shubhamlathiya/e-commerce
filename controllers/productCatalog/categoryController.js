@@ -1,5 +1,6 @@
 const {validationResult} = require('express-validator');
 const Category = require('../../models/productCatalog/categoryModel');
+const { deleteUploadedImage } = require('../../utils/upload');
 
 const slugify = (text) =>
     text
@@ -53,8 +54,8 @@ exports.createCategory = async (req, res) => {
             slug: finalSlug,
             parentId: parentId || null,
             level,
-            icon: icon || null,
-            image: image || null,
+            icon: (req.processedCategoryIcon?.original || icon) || null,
+            image: (req.processedCategoryImage?.original || image) || null,
             status,
             sortOrder,
             isFeatured,
@@ -150,6 +151,26 @@ exports.updateCategory = async (req, res) => {
                 updates.level = 0;
                 updates.parentId = null;
             }
+        }
+
+        // Handle uploaded media replacements
+        const existing = await Category.findById(id);
+        if (!existing) return res.status(404).json({success: false, message: 'Not found'});
+
+        if (req.processedCategoryImage?.original) {
+            if (existing.image) {
+                const oldFilename = String(existing.image).split('/').pop();
+                await deleteUploadedImage('categories', oldFilename);
+            }
+            updates.image = req.processedCategoryImage.original;
+        }
+
+        if (req.processedCategoryIcon?.original) {
+            if (existing.icon) {
+                const oldIconFilename = String(existing.icon).split('/').pop();
+                await deleteUploadedImage('categories', oldIconFilename);
+            }
+            updates.icon = req.processedCategoryIcon.original;
         }
 
         const category = await Category.findByIdAndUpdate(id, updates, {new: true});

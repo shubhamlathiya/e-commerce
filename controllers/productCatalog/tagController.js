@@ -5,13 +5,14 @@ function slugify(text) {
         .toLowerCase()
         .trim()
         .replace(/[^a-z0-9\s-]/g, '')
-        .replace(/\s+/g, '-')
-        .replace(/-+/g, '-');
+        .replace(/\s+/g, ' ')
+        .replace(/-+/g, ' ');
 }
 
 exports.createTag = async (req, res) => {
     try {
         const { name, slug, status = true } = req.body;
+
         const doc = await Tag.create({ name, slug: slug || slugify(name), status });
         res.status(201).json(doc);
     } catch (err) {

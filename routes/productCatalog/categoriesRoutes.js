@@ -2,6 +2,7 @@ const express = require('express');
 const {body, param, query} = require('express-validator');
 const categoryController = require('../../controllers/productCatalog/categoryController');
 const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
+const { categoryMediaUpload } = require('../../utils/upload');
 
 const router = express.Router();
 
@@ -220,7 +221,7 @@ router.get('/:id', [param('id').isMongoId()], categoryController.getCategoryById
  *       500:
  *         description: Server error
  */
-router.post('/', authenticateJWT, isAdmin, [
+router.post('/', authenticateJWT, isAdmin, categoryMediaUpload(), [
     body('name').isString().notEmpty(),
     body('slug').optional().isString(),
     body('parentId').optional().isMongoId(),
@@ -289,7 +290,7 @@ router.post('/', authenticateJWT, isAdmin, [
  *       500:
  *         description: Server error
  */
-router.patch('/:id', authenticateJWT, isAdmin, [
+router.patch('/:id', authenticateJWT, isAdmin, categoryMediaUpload(), [
     param('id').isMongoId(),
     body('name').optional().isString(),
     body('slug').optional().isString(),

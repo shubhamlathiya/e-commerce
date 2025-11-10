@@ -8,6 +8,8 @@ const NotificationLog = require('../../models/notifications/notificationLogModel
 const ShippingRule = require('../../models/shipping/shippingRuleModel');
 const UserAddress = require('../../models/shipping/userAddressModel');
 const Refund = require('../../models/orders/refundModel');
+const User = require('../../models/auth/userModel');
+const nodemailer = require('nodemailer');
 
 /**
  * Create a new order from cart
@@ -254,7 +256,7 @@ exports.updateOrderStatus = async (req, res) => {
         const {id} = req.params;
         const {status, comment} = req.body;
         const adminId = req.user.id;
-
+        console.log(req.body)
         // Validate status
         const validStatuses = ['processing', 'shipped', 'delivered', 'cancelled'];
         if (!validStatuses.includes(status)) {
@@ -658,5 +660,207 @@ exports.processReturnReplacement = async (req, res) => {
             message: 'Error processing request',
             error: error.message
         });
+    }
+};
+
+// Admin: create order directly
+exports.createAdminOrder = async (req, res) => {
+    // try {
+        const {
+            userId = null,
+            items = [],
+            paymentMethod,
+            shippingAddress,
+            billingAddress,
+            totals,
+            couponCode = null,
+            status = 'placed'
+        } = req.body;
+        console.log(req.body)
+        if (!Array.isArray(items) || items.length === 0) {
+            return res.status(400).json({ success: false, message: 'Items array is required' });
+        }
+        if (!paymentMethod) {
+            return res.status(400).json({ success: false, message: 'Payment method is required' });
+        }
+        if (!shippingAddress || typeof shippingAddress !== 'object') {
+            return res.status(400).json({ success: false, message: 'Shipping address is required' });
+        }
+
+        // Normalize items: ensure numeric price/quantity and compute line totals
+        const normalizedItems = items.map((it) => {
+            const qty = Number(it.quantity || 0);
+            const unit = Number(it.price || 0);
+            const lineTotal = Number(it.total != null ? it.total : unit * qty);
+            return {
+                ...it,
+                quantity: qty,
+                price: unit,
+                total: lineTotal
+            };
+        });
+        console.log("hy1")
+
+        // Compute order totals robustly
+        const subtotal = normalizedItems.reduce((sum, it) => sum + Number(it.total || 0), 0);
+        const discount = Number(totals?.discount || 0);
+        const shipping = Number(totals?.shipping || 0);
+        const tax = Number(totals?.tax || 0);
+        const grandTotal = totals?.grandTotal != null
+            ? Number(totals.grandTotal)
+            : Number((subtotal - discount + shipping + tax).toFixed(2));
+        console.log("hy2")
+
+        const calcTotals = {
+            subtotal: Number(subtotal.toFixed(2)),
+            discount: Number(discount.toFixed(2)),
+            shipping: Number(shipping.toFixed(2)),
+            tax: Number(tax.toFixed(2)),
+            grandTotal: Number(grandTotal.toFixed(2))
+        };
+        console.log("hy3")
+
+        const order = new Order({
+            userId,
+            items: normalizedItems,
+            paymentMethod,
+            paymentStatus: paymentMethod.toLowerCase() === 'cod' ? 'cod' : 'pending',
+            shippingAddress,
+            billingAddress: billingAddress || shippingAddress,
+            totals: calcTotals,
+            status,
+            couponCode
+        });
+        await order.save();
+        console.log("hy")
+        // Create order history safely (avoid 500 if updatedBy is unavailable)
+        try {
+            const history = new OrderHistory({
+                orderId: order._id,
+                status: order.status,
+                comment: 'Order created by admin',
+                updatedBy: req.user && req.user.id ? req.user.id : order.userId
+            });
+            await history.save();
+        } catch (e) {
+            // Log but don't fail the order creation
+            console.error('Failed to create order history:', e?.message || e);
+        }
+
+        return res.status(201).json({ success: true, data: order });
+    // } catch (error) {
+    //     return res.status(500).json({ success: false, message: 'Error creating order', error: error.message });
+    // }
+};
+
+// Admin: send invoice to customer (email) and log per NotificationLog schema
+exports.sendInvoice = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const order = await Order.findById(id).lean();
+        if (!order) {
+            return res.status(404).json({ success: false, message: 'Order not found' });
+        }
+
+        // Resolve recipient
+        const user = order.userId ? await User.findById(order.userId).lean() : null;
+        const recipientEmail = user?.email;
+        if (!recipientEmail) {
+            // Log as failed when no email present
+            await new NotificationLog({
+                userId: order.userId,
+                type: 'email',
+                template: 'invoice',
+                orderId: id,
+                status: 'failed',
+            }).save();
+            return res.status(400).json({ success: false, message: 'User email not available' });
+        }
+
+        // Create transporter from env
+        const transporter = nodemailer.createTransport({
+            service: process.env.EMAIL_SERVICE,
+            host: process.env.EMAIL_HOST,
+            port: Number(process.env.EMAIL_PORT) || 587,
+            secure: String(process.env.EMAIL_PORT) === '465',
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASSWORD,
+            },
+        });
+
+        // Basic HTML invoice summary
+        const placedAt = order.placedAt || order.createdAt || order.updatedAt;
+        const placedStr = placedAt ? new Date(placedAt).toLocaleString() : '';
+        const grandTotal = order?.totals?.grandTotal ?? order?.totals?.total ?? 0;
+        const number = order.orderNumber || order.number || String(order._id || id);
+        const itemsHtml = Array.isArray(order.items)
+            ? order.items
+                .map((it, idx) => `<tr><td>${String(idx + 1).padStart(2, '0')}</td><td>${it.name || it.title || it.sku || '—'}</td><td>${it.quantity || it.qty || 1}</td><td>${Number(it.price || 0).toFixed(2)}</td></tr>`)
+                .join('')
+            : '';
+
+        const mailOptions = {
+            from: process.env.EMAIL_FROM || process.env.EMAIL_USER,
+            to: recipientEmail,
+            subject: `Invoice #${String(number).slice(-6)} - ${Number(grandTotal).toFixed(2)}`,
+            html: `
+                <div style="font-family: Arial, sans-serif; max-width: 640px; margin: 0 auto;">
+                  <h2 style="margin-bottom:8px;">Invoice #${String(number).slice(-6)}</h2>
+                  <p style="margin-top:0;color:#555;">Date Issued: ${placedStr}</p>
+                  <table cellpadding="8" cellspacing="0" border="1" style="width:100%; border-collapse: collapse; font-size: 14px;">
+                    <thead>
+                      <tr style="background:#f7f7f7;"><th>SL</th><th>Item</th><th>Qty</th><th>Unit Price</th></tr>
+                    </thead>
+                    <tbody>
+                      ${itemsHtml}
+                    </tbody>
+                  </table>
+                  <p style="text-align:right; font-weight:600; margin-top:12px;">Grand Total: ₹${Number(grandTotal).toFixed(2)}</p>
+                  <p style="color:#777; font-size:13px;">Thank you for your purchase!</p>
+                </div>
+            `,
+        };
+
+        let sent = false;
+        try {
+            await transporter.sendMail(mailOptions);
+            sent = true;
+        } catch (err) {
+            sent = false;
+        }
+
+        // Log Notification result per schema
+        await new NotificationLog({
+            userId: order.userId,
+            type: 'email',
+            template: 'invoice',
+            orderId: id,
+            status: sent ? 'sent' : 'failed',
+        }).save();
+
+        if (sent) {
+            return res.status(200).json({ success: true, message: 'Invoice email sent successfully' });
+        } else {
+            return res.status(500).json({ success: false, message: 'Failed to send invoice email' });
+        }
+    } catch (error) {
+        // Attempt to log failure if order was resolved
+        try {
+            const id = req?.params?.id;
+            const order = id ? await Order.findById(id).lean() : null;
+            if (order) {
+                await new NotificationLog({
+                    userId: order.userId,
+                    type: 'email',
+                    template: 'invoice',
+                    orderId: id,
+                    status: 'failed',
+                }).save();
+            }
+        } catch (_) {
+            // swallow secondary logging errors
+        }
+        return res.status(500).json({ success: false, message: 'Error sending invoice', error: error.message });
     }
 };

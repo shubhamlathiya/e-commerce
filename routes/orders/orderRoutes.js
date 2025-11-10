@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const {check} = require('express-validator');
+const validate = require('../../utils/productCatalog/validate');
 const orderController = require('../../controllers/orders/orderController');
 const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
 
@@ -280,6 +281,24 @@ router.get('/admin/all',
     orderController.getAllOrders
 );
 
+// Admin: create order directly
+router.post('/admin',
+    authenticateJWT,
+    isAdmin,
+    [
+        check('items').isArray().withMessage('Items array is required'),
+        check('paymentMethod').isString().withMessage('Payment method is required'),
+        check('shippingAddress').isObject().withMessage('Shipping address is required'),
+        check('billingAddress').optional().isObject(),
+        check('totals').optional().isObject(),
+        check('couponCode').optional().isString(),
+        check('userId').optional().isMongoId(),
+        check('status').optional().isString()
+    ],
+    validate,
+    orderController.createAdminOrder
+);
+
 /**
  * @swagger
  * /api/orders/admin/{id}/status:
@@ -324,6 +343,13 @@ router.put('/admin/:id/status',
         check('comment').optional().isString()
     ],
     orderController.updateOrderStatus
+);
+
+// Admin: send invoice
+router.post('/admin/:id/invoice/send',
+    authenticateJWT,
+    isAdmin,
+    orderController.sendInvoice
 );
 
 /**
