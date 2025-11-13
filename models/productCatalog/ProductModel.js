@@ -33,7 +33,7 @@ const ProductSchema = new Schema(
         }],
         type: {
             type: String,
-            enum: ['simple', 'variable'],
+            enum: ['simple', 'variant'],
             default: 'simple'
         },
         sku: {

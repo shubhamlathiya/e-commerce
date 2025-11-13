@@ -30,9 +30,10 @@ exports.register = async (req, res) => {
                 errors: errors.array()
             });
         }
-
+        // console.log(errors);
         const {email, phone, password, name} = req.body;
-
+        console.log(req.body);
+        console.log({email, phone, password, name});
         // Ensure at least email or phone is provided
         if (!email && !phone) {
             return res.status(400).json({
@@ -41,14 +42,17 @@ exports.register = async (req, res) => {
             });
         }
 
-        // Check if user already exists
-        const existingUser = await User.findOne({
-            $or: [
-                {email: email || null},
-                {phone: phone || null}
-            ]
-        });
+        let existingUser = null;
 
+        if (email && phone) {
+            existingUser = await User.findOne({ $or: [{ email }, { phone }] });
+        } else if (email) {
+            existingUser = await User.findOne({ email });
+        } else if (phone) {
+            existingUser = await User.findOne({ phone });
+        }
+
+        console.log(existingUser)
         if (existingUser) {
             return res.status(409).json({
                 success: false,

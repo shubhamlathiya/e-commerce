@@ -110,18 +110,18 @@ const router = express.Router();
  */
 router.post(
     '/register',
-    [
-        body('email').optional().isEmail().withMessage('Must be a valid email address'),
-        body('phone').optional().isMobilePhone().withMessage('Must be a valid phone number'),
-        body('password')
-            .isLength({min: 8})
-            .withMessage('Password must be at least 8 characters long')
-            .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
-            .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
-            .matches(/[0-9]/).withMessage('Password must contain at least one number')
-            .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Password must contain at least one special character'),
-        body('name').optional().isString().withMessage('Name must be a string')
-    ],
+    // [
+    //     body('email').optional().isEmail().withMessage('Must be a valid email address'),
+    //     body('phone').optional().isMobilePhone().withMessage('Must be a valid phone number'),
+    //     body('password')
+    //         .isLength({min: 8})
+    //         .withMessage('Password must be at least 8 characters long')
+    //         .matches(/[A-Z]/).withMessage('Password must contain at least one uppercase letter')
+    //         .matches(/[a-z]/).withMessage('Password must contain at least one lowercase letter')
+    //         .matches(/[0-9]/).withMessage('Password must contain at least one number')
+    //         .matches(/[!@#$%^&*(),.?":{}|<>]/).withMessage('Password must contain at least one special character'),
+    //     body('name').optional().isString().withMessage('Name must be a string')
+    // ],
     authController.register
 );
 

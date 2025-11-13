@@ -10,12 +10,16 @@ const router = express.Router();
  * tags:
  *   - name: Settings - Business
  *     description: Manage business configuration and settings.
+ *   - name: Settings - Email
+ *     description: Manage email configuration and SMTP settings.
+ *   - name: Settings - reCAPTCHA
+ *     description: Manage reCAPTCHA configuration.
+ *   - name: Settings - Payment Gateways
+ *     description: Configure and manage payment gateway integrations.
  *   - name: Settings - SEO Pages
  *     description: Manage site-wide SEO pages and metadata.
  *   - name: Settings - Templates
  *     description: Manage email and SMS templates.
- *   - name: Settings - Payment Gateways
- *     description: Configure and manage payment gateway integrations.
  *   - name: Settings - Mobile App
  *     description: Manage mobile app configuration and theme settings.
  */
@@ -33,16 +37,19 @@ const router = express.Router();
  *         businessName:
  *           type: string
  *           description: Name of the business
- *         businessEmail:
+ *         contactEmail:
  *           type: string
  *           format: email
- *           description: Primary business email
- *         businessPhone:
+ *           description: Primary business contact email
+ *         phone:
  *           type: string
  *           description: Business contact phone number
  *         address:
- *           type: object
- *           description: Business address details
+ *           type: string
+ *           description: Business address
+ *         gstNumber:
+ *           type: string
+ *           description: GST identification number
  *         currency:
  *           type: string
  *           description: Default currency code
@@ -56,58 +63,52 @@ const router = express.Router();
  *           type: string
  *           format: date-time
  *
- *     SEOPage:
+ *     EmailSettings:
  *       type: object
  *       properties:
  *         _id:
  *           type: string
- *         page:
+ *         smtp_host:
  *           type: string
- *           description: Page identifier or route
- *         metaTitle:
+ *           description: SMTP server host
+ *         smtp_port:
+ *           type: integer
+ *           description: SMTP server port
+ *         smtp_username:
  *           type: string
- *           description: SEO meta title
- *         metaDescription:
+ *           description: SMTP username
+ *         smtp_password:
  *           type: string
- *           description: SEO meta description
- *         metaKeywords:
- *           type: array
- *           items:
- *             type: string
- *           description: SEO keywords
- *         canonicalUrl:
+ *           description: SMTP password (encrypted)
+ *         smtp_secure:
  *           type: string
- *           description: Canonical URL for the page
- *         ogImage:
+ *           enum: [none, ssl, tls]
+ *           description: Security protocol
+ *         from_email:
  *           type: string
- *           description: Open Graph image URL
- *
- *     Template:
- *       type: object
- *       properties:
- *         _id:
+ *           format: email
+ *           description: Sender email address
+ *         from_name:
  *           type: string
- *         type:
- *           type: string
- *           description: Template type (welcome, notification, etc.)
- *         channel:
- *           type: string
- *           enum: [email, sms]
- *           description: Communication channel
- *         subject:
- *           type: string
- *           description: Email subject or SMS title
- *         body:
- *           type: string
- *           description: Template content
- *         variables:
- *           type: array
- *           items:
- *             type: string
- *           description: Available template variables
- *         isActive:
+ *           description: Sender display name
+ *         status:
  *           type: boolean
- *           description: Whether template is active
+ *           description: Whether email service is active
+ *
+ *     RecaptchaSettings:
+ *       type: object
+ *       properties:
+ *         _id:
+ *           type: string
+ *         site_key:
+ *           type: string
+ *           description: reCAPTCHA site key
+ *         secret_key:
+ *           type: string
+ *           description: reCAPTCHA secret key
+ *         status:
+ *           type: boolean
+ *           description: Whether reCAPTCHA is enabled
  *
  *     PaymentGateway:
  *       type: object
@@ -126,27 +127,6 @@ const router = express.Router();
  *         testMode:
  *           type: boolean
  *           description: Whether in test mode
- *
- *     MobileAppConfig:
- *       type: object
- *       properties:
- *         _id:
- *           type: string
- *         version:
- *           type: string
- *           description: App version
- *         theme:
- *           type: object
- *           description: Theme configuration
- *         apiUrl:
- *           type: string
- *           description: Backend API URL
- *         features:
- *           type: object
- *           description: Enabled/disabled features
- *         maintenanceMode:
- *           type: boolean
- *           description: Whether app is in maintenance
  */
 
 // =============================================
@@ -157,27 +137,11 @@ const router = express.Router();
  * @swagger
  * /api/settings/business:
  *   get:
- *     summary: Get all business settings
- *     description: Retrieve paginated list of business configuration settings (Admin only).
+ *     summary: Get business settings
+ *     description: Retrieve business configuration settings (Admin only).
  *     tags: [Settings - Business]
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           minimum: 1
- *           default: 1
- *         description: Page number for pagination
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           minimum: 1
- *           maximum: 200
- *           default: 20
- *         description: Number of records per page
  *     responses:
  *       200:
  *         description: Business settings retrieved successfully
@@ -189,20 +153,7 @@ const router = express.Router();
  *                 success:
  *                   type: boolean
  *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/BusinessSettings'
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
- *                     total:
- *                       type: integer
- *                     pages:
- *                       type: integer
+ *                   $ref: '#/components/schemas/BusinessSettings'
  *       401:
  *         description: Unauthorized access
  *       403:
@@ -210,8 +161,8 @@ const router = express.Router();
  *       500:
  *         description: Server error
  *   post:
- *     summary: Create new business setting
- *     description: Create a new business configuration setting (Admin only).
+ *     summary: Create business settings
+ *     description: Create new business configuration settings (Admin only).
  *     tags: [Settings - Business]
  *     security:
  *       - bearerAuth: []
@@ -223,34 +174,40 @@ const router = express.Router();
  *             type: object
  *             required:
  *               - businessName
+ *               - contactEmail
  *             properties:
  *               businessName:
  *                 type: string
  *                 description: Name of the business
  *                 example: "My Awesome Business"
- *               businessEmail:
+ *               contactEmail:
  *                 type: string
  *                 format: email
- *                 description: Primary business email
+ *                 description: Primary contact email
  *                 example: "contact@mybusiness.com"
- *               businessPhone:
+ *               phone:
  *                 type: string
  *                 description: Business phone number
  *                 example: "+1234567890"
  *               address:
- *                 type: object
+ *                 type: string
  *                 description: Business address
+ *                 example: "123 Business Street, City, Country"
+ *               gstNumber:
+ *                 type: string
+ *                 description: GST identification number
+ *                 example: "GSTIN123456789"
  *               currency:
  *                 type: string
  *                 description: Default currency code
- *                 example: "USD"
+ *                 example: "INR"
  *               timezone:
  *                 type: string
  *                 description: Business timezone
- *                 example: "America/New_York"
+ *                 example: "Asia/Kolkata"
  *     responses:
  *       201:
- *         description: Business setting created successfully
+ *         description: Business settings created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -269,15 +226,13 @@ const router = express.Router();
  *       500:
  *         description: Server error
  */
-router.get('/business', authenticateJWT, isAdmin, [
-    query('page').optional().isInt({min: 1}),
-    query('limit').optional().isInt({min: 1, max: 200})
-], settingsController.listBusinessSettings);
-
+router.get('/business', authenticateJWT, isAdmin, settingsController.getBusinessSettings);
 router.post('/business', authenticateJWT, isAdmin, [
     body('businessName').isString().notEmpty().withMessage('Business name is required'),
-    body('businessEmail').optional().isEmail().withMessage('Valid email is required'),
-    body('businessPhone').optional().isString(),
+    body('contactEmail').isEmail().withMessage('Valid email is required'),
+    body('phone').optional().isString(),
+    body('address').optional().isString(),
+    body('gstNumber').optional().isString(),
     body('currency').optional().isString(),
     body('timezone').optional().isString()
 ], settingsController.createBusinessSettings);
@@ -285,43 +240,8 @@ router.post('/business', authenticateJWT, isAdmin, [
 /**
  * @swagger
  * /api/settings/business/{id}:
- *   get:
- *     summary: Get business setting by ID
- *     description: Retrieve specific business settings by ID (Admin only).
- *     tags: [Settings - Business]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           pattern: '^[0-9a-fA-F]{24}$'
- *         description: MongoDB ObjectId of the business settings
- *         example: 507f1f77bcf86cd799439011
- *     responses:
- *       200:
- *         description: Business setting details retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/BusinessSettings'
- *       401:
- *         description: Unauthorized access
- *       403:
- *         description: Admin access required
- *       404:
- *         description: Business settings not found
- *       500:
- *         description: Server error
  *   put:
- *     summary: Update business setting
+ *     summary: Update business settings
  *     description: Update existing business settings (Admin only).
  *     tags: [Settings - Business]
  *     security:
@@ -334,7 +254,6 @@ router.post('/business', authenticateJWT, isAdmin, [
  *           type: string
  *           pattern: '^[0-9a-fA-F]{24}$'
  *         description: MongoDB ObjectId of the business settings
- *         example: 507f1f77bcf86cd799439011
  *     requestBody:
  *       required: true
  *       content:
@@ -345,16 +264,19 @@ router.post('/business', authenticateJWT, isAdmin, [
  *               businessName:
  *                 type: string
  *                 description: Updated business name
- *               businessEmail:
+ *               contactEmail:
  *                 type: string
  *                 format: email
- *                 description: Updated business email
- *               businessPhone:
+ *                 description: Updated contact email
+ *               phone:
  *                 type: string
- *                 description: Updated business phone
+ *                 description: Updated phone number
  *               address:
- *                 type: object
+ *                 type: string
  *                 description: Updated address
+ *               gstNumber:
+ *                 type: string
+ *                 description: Updated GST number
  *               currency:
  *                 type: string
  *                 description: Updated currency
@@ -383,76 +305,27 @@ router.post('/business', authenticateJWT, isAdmin, [
  *         description: Business settings not found
  *       500:
  *         description: Server error
- *   delete:
- *     summary: Delete business setting
- *     description: Delete business settings configuration (Admin only).
- *     tags: [Settings - Business]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           pattern: '^[0-9a-fA-F]{24}$'
- *         description: MongoDB ObjectId of the business settings to delete
- *         example: 507f1f77bcf86cd799439011
- *     responses:
- *       200:
- *         description: Business settings deleted successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 message:
- *                   type: string
- *       401:
- *         description: Unauthorized access
- *       403:
- *         description: Admin access required
- *       404:
- *         description: Business settings not found
- *       500:
- *         description: Server error
  */
-router.get('/business/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid business settings ID is required')
-], settingsController.getBusinessSettingsById);
-
 router.put('/business/:id', authenticateJWT, isAdmin, [
     param('id').isMongoId().withMessage('Valid business settings ID is required')
 ], settingsController.updateBusinessSettings);
 
-router.delete('/business/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid business settings ID is required')
-], settingsController.deleteBusinessSettings);
-
 // =============================================
-// SEO PAGES ENDPOINTS
+// EMAIL SETTINGS ENDPOINTS
 // =============================================
 
 /**
  * @swagger
- * /api/settings/seo-pages:
+ * /api/settings/email:
  *   get:
- *     summary: List SEO pages
- *     description: Retrieve all SEO pages with optional filtering by page name (Admin only).
- *     tags: [Settings - SEO Pages]
+ *     summary: Get email settings
+ *     description: Retrieve email configuration settings (Admin only).
+ *     tags: [Settings - Email]
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: string
- *         description: Filter by page name/identifier
  *     responses:
  *       200:
- *         description: List of SEO pages retrieved successfully
+ *         description: Email settings retrieved successfully
  *         content:
  *           application/json:
  *             schema:
@@ -461,199 +334,17 @@ router.delete('/business/:id', authenticateJWT, isAdmin, [
  *                 success:
  *                   type: boolean
  *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/SEOPage'
+ *                   $ref: '#/components/schemas/EmailSettings'
  *       401:
  *         description: Unauthorized access
  *       403:
  *         description: Admin access required
  *       500:
  *         description: Server error
- *   post:
- *     summary: Create SEO page
- *     description: Create a new SEO page configuration (Admin only).
- *     tags: [Settings - SEO Pages]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - page
- *             properties:
- *               page:
- *                 type: string
- *                 description: Page identifier or route
- *                 example: "home"
- *               metaTitle:
- *                 type: string
- *                 description: SEO meta title
- *                 example: "My Business - Home"
- *               metaDescription:
- *                 type: string
- *                 description: SEO meta description
- *                 example: "Welcome to My Business - your trusted partner"
- *               metaKeywords:
- *                 type: array
- *                 items:
- *                   type: string
- *                 description: SEO keywords
- *                 example: ["business", "services", "quality"]
- *               canonicalUrl:
- *                 type: string
- *                 description: Canonical URL
- *                 example: "https://mybusiness.com"
- *               ogImage:
- *                 type: string
- *                 description: Open Graph image URL
- *     responses:
- *       201:
- *         description: SEO page created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   $ref: '#/components/schemas/SEOPage'
- *       400:
- *         description: Invalid input data
- *       401:
- *         description: Unauthorized access
- *       403:
- *         description: Admin access required
- *       500:
- *         description: Server error
- */
-router.get('/seo-pages', authenticateJWT, isAdmin, [
-    query('page').optional().isString()
-], settingsController.listSeoPages);
-
-router.post('/seo-pages', authenticateJWT, isAdmin, [
-    body('page').isString().notEmpty().withMessage('Page identifier is required'),
-    body('metaTitle').optional().isString(),
-    body('metaDescription').optional().isString(),
-    body('metaKeywords').optional().isArray(),
-    body('canonicalUrl').optional().isString(),
-    body('ogImage').optional().isString()
-], settingsController.createSeoPage);
-
-/**
- * @swagger
- * /api/settings/seo-pages/{id}:
- *   get:
- *     summary: Get SEO page by ID
- *     tags: [Settings - SEO Pages]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *           pattern: '^[0-9a-fA-F]{24}$'
- *     responses:
- *       200:
- *         description: SEO page details
- *       404:
- *         description: SEO page not found
  *   put:
- *     summary: Update SEO page
- *     tags: [Settings - SEO Pages]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: SEO page updated successfully
- *   delete:
- *     summary: Delete SEO page
- *     tags: [Settings - SEO Pages]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: id
- *         required: true
- *         schema:
- *           type: string
- *     responses:
- *       200:
- *         description: SEO page deleted successfully
- */
-router.get('/seo-pages/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid SEO page ID is required')
-], settingsController.getSeoPageById);
-
-router.put('/seo-pages/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid SEO page ID is required')
-], settingsController.updateSeoPage);
-
-router.delete('/seo-pages/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid SEO page ID is required')
-], settingsController.deleteSeoPage);
-
-// =============================================
-// TEMPLATES ENDPOINTS
-// =============================================
-
-/**
- * @swagger
- * /api/settings/templates:
- *   get:
- *     summary: List templates
- *     description: Retrieve email and SMS templates with filtering options (Admin only).
- *     tags: [Settings - Templates]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: channel
- *         schema:
- *           type: string
- *           enum: [email, sms]
- *         description: Filter by communication channel
- *       - in: query
- *         name: type
- *         schema:
- *           type: string
- *         description: Filter by template type
- *     responses:
- *       200:
- *         description: Template list retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/Template'
- *       401:
- *         description: Unauthorized access
- *       403:
- *         description: Admin access required
- *       500:
- *         description: Server error
- *   post:
- *     summary: Create template
- *     description: Create a new email or SMS template (Admin only).
- *     tags: [Settings - Templates]
+ *     summary: Update email settings
+ *     description: Update email configuration settings (Admin only).
+ *     tags: [Settings - Email]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -663,40 +354,47 @@ router.delete('/seo-pages/:id', authenticateJWT, isAdmin, [
  *           schema:
  *             type: object
  *             required:
- *               - type
- *               - channel
- *               - body
+ *               - smtp_host
+ *               - smtp_port
+ *               - from_email
  *             properties:
- *               type:
+ *               smtp_host:
  *                 type: string
- *                 description: Template type identifier
- *                 example: "welcome_email"
- *               channel:
+ *                 description: SMTP server host
+ *                 example: "smtp.gmail.com"
+ *               smtp_port:
+ *                 type: integer
+ *                 description: SMTP server port
+ *                 example: 587
+ *               smtp_username:
  *                 type: string
- *                 enum: [email, sms]
- *                 description: Communication channel
- *                 example: "email"
- *               subject:
+ *                 description: SMTP username
+ *                 example: "your-email@gmail.com"
+ *               smtp_password:
  *                 type: string
- *                 description: Email subject line
- *                 example: "Welcome to Our Service!"
- *               body:
+ *                 description: SMTP password
+ *                 example: "your-app-password"
+ *               smtp_secure:
  *                 type: string
- *                 description: Template content with variables
- *                 example: "Hello {{name}}, welcome to our platform!"
- *               variables:
- *                 type: array
- *                 items:
- *                   type: string
- *                 description: Available template variables
- *                 example: ["name", "email"]
- *               isActive:
+ *                 enum: [none, ssl, tls]
+ *                 description: Security protocol
+ *                 example: "tls"
+ *               from_email:
+ *                 type: string
+ *                 format: email
+ *                 description: Sender email address
+ *                 example: "noreply@mybusiness.com"
+ *               from_name:
+ *                 type: string
+ *                 description: Sender display name
+ *                 example: "My Business"
+ *               status:
  *                 type: boolean
- *                 description: Whether template is active
- *                 default: true
+ *                 description: Whether email service is active
+ *                 example: true
  *     responses:
- *       201:
- *         description: Template created successfully
+ *       200:
+ *         description: Email settings updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -705,7 +403,7 @@ router.delete('/seo-pages/:id', authenticateJWT, isAdmin, [
  *                 success:
  *                   type: boolean
  *                 data:
- *                   $ref: '#/components/schemas/Template'
+ *                   $ref: '#/components/schemas/EmailSettings'
  *       400:
  *         description: Invalid input data
  *       401:
@@ -715,31 +413,104 @@ router.delete('/seo-pages/:id', authenticateJWT, isAdmin, [
  *       500:
  *         description: Server error
  */
-router.get('/templates', authenticateJWT, isAdmin, [
-    query('channel').optional().isIn(['email', 'sms']),
-    query('type').optional().isString()
-], settingsController.listTemplates);
+router.get('/email', authenticateJWT, isAdmin, settingsController.getEmailSettings);
+router.put('/email', authenticateJWT, isAdmin, [
+    body('smtp_host').isString().notEmpty().withMessage('SMTP host is required'),
+    body('smtp_port').isInt({ min: 1, max: 65535 }).withMessage('Valid SMTP port is required'),
+    body('smtp_username').optional().isString(),
+    body('smtp_password').optional().isString(),
+    body('smtp_secure').isIn(['none', 'ssl', 'tls']).withMessage('Security must be none, ssl, or tls'),
+    body('from_email').isEmail().withMessage('Valid from email is required'),
+    body('from_name').optional().isString(),
+    body('status').optional().isBoolean()
+], settingsController.updateEmailSettings);
 
-router.post('/templates', authenticateJWT, isAdmin, [
-    body('type').isString().notEmpty().withMessage('Template type is required'),
-    body('channel').isIn(['email', 'sms']).withMessage('Channel must be email or sms'),
-    body('subject').optional().isString(),
-    body('body').isString().notEmpty().withMessage('Template body is required'),
-    body('variables').optional().isArray(),
-    body('isActive').optional().isBoolean()
-], settingsController.createTemplate);
+// =============================================
+// RECAPTCHA SETTINGS ENDPOINTS
+// =============================================
 
-router.get('/templates/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid template ID is required')
-], settingsController.getTemplateById);
-
-router.put('/templates/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid template ID is required')
-], settingsController.updateTemplate);
-
-router.delete('/templates/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid template ID is required')
-], settingsController.deleteTemplate);
+/**
+ * @swagger
+ * /api/settings/recaptcha:
+ *   get:
+ *     summary: Get reCAPTCHA settings
+ *     description: Retrieve reCAPTCHA configuration settings (Admin only).
+ *     tags: [Settings - reCAPTCHA]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: reCAPTCHA settings retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/RecaptchaSettings'
+ *       401:
+ *         description: Unauthorized access
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Server error
+ *   put:
+ *     summary: Update reCAPTCHA settings
+ *     description: Update reCAPTCHA configuration settings (Admin only).
+ *     tags: [Settings - reCAPTCHA]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - site_key
+ *               - secret_key
+ *             properties:
+ *               site_key:
+ *                 type: string
+ *                 description: reCAPTCHA site key
+ *                 example: "6LeIxAcTAAAAAJcZVRqyHh71UMIEGNQ_MXjiZKhI"
+ *               secret_key:
+ *                 type: string
+ *                 description: reCAPTCHA secret key
+ *                 example: "6LeIxAcTAAAAAGG-vFI1TnRWxMZNFuojJ4WifJWe"
+ *               status:
+ *                 type: boolean
+ *                 description: Whether reCAPTCHA is enabled
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: reCAPTCHA settings updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   $ref: '#/components/schemas/RecaptchaSettings'
+ *       400:
+ *         description: Invalid input data
+ *       401:
+ *         description: Unauthorized access
+ *       403:
+ *         description: Admin access required
+ *       500:
+ *         description: Server error
+ */
+router.get('/recaptcha', authenticateJWT, isAdmin, settingsController.getRecaptchaSettings);
+router.put('/recaptcha', authenticateJWT, isAdmin, [
+    body('site_key').isString().notEmpty().withMessage('Site key is required'),
+    body('secret_key').isString().notEmpty().withMessage('Secret key is required'),
+    body('status').optional().isBoolean()
+], settingsController.updateRecaptchaSettings);
 
 // =============================================
 // PAYMENT GATEWAYS ENDPOINTS
@@ -749,22 +520,11 @@ router.delete('/templates/:id', authenticateJWT, isAdmin, [
  * @swagger
  * /api/settings/payment-gateways:
  *   get:
- *     summary: List payment gateway configurations
- *     description: Retrieve all payment gateway configurations with filtering (Admin only).
+ *     summary: Get payment gateways
+ *     description: Retrieve all payment gateway configurations (Admin only).
  *     tags: [Settings - Payment Gateways]
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: query
- *         name: name
- *         schema:
- *           type: string
- *         description: Filter by gateway name
- *       - in: query
- *         name: status
- *         schema:
- *           type: boolean
- *         description: Filter by active status
  *     responses:
  *       200:
  *         description: Payment gateways retrieved successfully
@@ -786,7 +546,7 @@ router.delete('/templates/:id', authenticateJWT, isAdmin, [
  *       500:
  *         description: Server error
  *   post:
- *     summary: Create payment gateway config
+ *     summary: Create payment gateway
  *     description: Create a new payment gateway configuration (Admin only).
  *     tags: [Settings - Payment Gateways]
  *     security:
@@ -803,22 +563,22 @@ router.delete('/templates/:id', authenticateJWT, isAdmin, [
  *               name:
  *                 type: string
  *                 description: Payment gateway name
- *                 example: "stripe"
+ *                 example: "razorpay"
  *               config:
  *                 type: object
  *                 description: Gateway-specific configuration
- *                 example: {"apiKey": "sk_test_...", "webhookSecret": "whsec_..."}
+ *                 example: {"key_id": "rzp_test_123", "key_secret": "secret_123"}
  *               status:
  *                 type: boolean
  *                 description: Whether gateway is active
- *                 default: false
+ *                 example: false
  *               testMode:
  *                 type: boolean
  *                 description: Whether in test mode
- *                 default: true
+ *                 example: true
  *     responses:
  *       201:
- *         description: Payment gateway configuration created successfully
+ *         description: Payment gateway created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -837,128 +597,53 @@ router.delete('/templates/:id', authenticateJWT, isAdmin, [
  *       500:
  *         description: Server error
  */
-router.get('/payment-gateways', authenticateJWT, isAdmin, [
-    query('name').optional().isString(),
-    query('status').optional().isBoolean()
-], settingsController.listPaymentConfigs);
-
+router.get('/payment-gateways', authenticateJWT, isAdmin, settingsController.getPaymentGateways);
 router.post('/payment-gateways', authenticateJWT, isAdmin, [
     body('name').isString().notEmpty().withMessage('Gateway name is required'),
     body('config').optional().isObject(),
     body('status').optional().isBoolean(),
     body('testMode').optional().isBoolean()
-], settingsController.createPaymentConfig);
-
-router.get('/payment-gateways/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid payment gateway ID is required')
-], settingsController.getPaymentConfigById);
-
-router.put('/payment-gateways/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid payment gateway ID is required')
-], settingsController.updatePaymentConfig);
-
-router.delete('/payment-gateways/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid payment gateway ID is required')
-], settingsController.deletePaymentConfig);
-
-// =============================================
-// MOBILE APP CONFIG ENDPOINTS
-// =============================================
+], settingsController.createPaymentGateway);
 
 /**
  * @swagger
- * /api/settings/mobile-app:
- *   get:
- *     summary: List mobile app configurations
- *     description: Retrieve paginated list of mobile app configurations (Admin only).
- *     tags: [Settings - Mobile App]
+ * /api/settings/payment-gateways/{id}:
+ *   put:
+ *     summary: Update payment gateway
+ *     description: Update existing payment gateway configuration (Admin only).
+ *     tags: [Settings - Payment Gateways]
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - in: query
- *         name: page
+ *       - in: path
+ *         name: id
+ *         required: true
  *         schema:
- *           type: integer
- *           minimum: 1
- *           default: 1
- *         description: Page number for pagination
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           minimum: 1
- *           maximum: 200
- *           default: 20
- *         description: Number of records per page
- *     responses:
- *       200:
- *         description: Mobile app configurations retrieved successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/MobileAppConfig'
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     page:
- *                       type: integer
- *                     limit:
- *                       type: integer
- *                     total:
- *                       type: integer
- *                     pages:
- *                       type: integer
- *       401:
- *         description: Unauthorized access
- *       403:
- *         description: Admin access required
- *       500:
- *         description: Server error
- *   post:
- *     summary: Create mobile app config
- *     description: Create a new mobile app configuration (Admin only).
- *     tags: [Settings - Mobile App]
- *     security:
- *       - bearerAuth: []
+ *           type: string
+ *           pattern: '^[0-9a-fA-F]{24}$'
+ *         description: MongoDB ObjectId of the payment gateway
  *     requestBody:
  *       required: true
  *       content:
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - version
  *             properties:
- *               version:
+ *               name:
  *                 type: string
- *                 description: App version number
- *                 example: "1.2.0"
- *               theme:
+ *                 description: Updated gateway name
+ *               config:
  *                 type: object
- *                 description: Theme configuration
- *                 example: {"primaryColor": "#3498db", "fontFamily": "Arial"}
- *               apiUrl:
- *                 type: string
- *                 description: Backend API URL
- *                 example: "https://api.myapp.com/v1"
- *               features:
- *                 type: object
- *                 description: Feature flags
- *                 example: {"chat": true, "payments": false}
- *               maintenanceMode:
+ *                 description: Updated configuration
+ *               status:
  *                 type: boolean
- *                 description: Whether app is in maintenance
- *                 default: false
+ *                 description: Updated status
+ *               testMode:
+ *                 type: boolean
+ *                 description: Updated test mode
  *     responses:
- *       201:
- *         description: Mobile app configuration created successfully
+ *       200:
+ *         description: Payment gateway updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -967,39 +652,82 @@ router.delete('/payment-gateways/:id', authenticateJWT, isAdmin, [
  *                 success:
  *                   type: boolean
  *                 data:
- *                   $ref: '#/components/schemas/MobileAppConfig'
+ *                   $ref: '#/components/schemas/PaymentGateway'
  *       400:
  *         description: Invalid input data
  *       401:
  *         description: Unauthorized access
  *       403:
  *         description: Admin access required
+ *       404:
+ *         description: Payment gateway not found
+ *       500:
+ *         description: Server error
+ *   delete:
+ *     summary: Delete payment gateway
+ *     description: Delete payment gateway configuration (Admin only).
+ *     tags: [Settings - Payment Gateways]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           pattern: '^[0-9a-fA-F]{24}$'
+ *         description: MongoDB ObjectId of the payment gateway to delete
+ *     responses:
+ *       200:
+ *         description: Payment gateway deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *       401:
+ *         description: Unauthorized access
+ *       403:
+ *         description: Admin access required
+ *       404:
+ *         description: Payment gateway not found
  *       500:
  *         description: Server error
  */
-router.get('/mobile-app', authenticateJWT, isAdmin, [
-    query('page').optional().isInt({min: 1}),
-    query('limit').optional().isInt({min: 1, max: 200})
-], settingsController.listMobileConfigs);
+router.put('/payment-gateways/:id', authenticateJWT, isAdmin, [
+    param('id').isMongoId().withMessage('Valid payment gateway ID is required')
+], settingsController.updatePaymentGateway);
+router.delete('/payment-gateways/:id', authenticateJWT, isAdmin, [
+    param('id').isMongoId().withMessage('Valid payment gateway ID is required')
+], settingsController.deletePaymentGateway);
 
-router.post('/mobile-app', authenticateJWT, isAdmin, [
-    body('version').isString().notEmpty().withMessage('Version is required'),
-    body('theme').optional().isObject(),
-    body('apiUrl').optional().isString(),
-    body('features').optional().isObject(),
-    body('maintenanceMode').optional().isBoolean()
-], settingsController.createMobileConfig);
+// =============================================
+// EXISTING ENDPOINTS (KEPT FOR BACKWARD COMPATIBILITY)
+// =============================================
 
-router.get('/mobile-app/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid mobile config ID is required')
-], settingsController.getMobileConfigById);
+// SEO Pages endpoints
+router.get('/seo-pages', authenticateJWT, isAdmin, settingsController.listSeoPages);
+router.post('/seo-pages', authenticateJWT, isAdmin, settingsController.createSeoPage);
+router.get('/seo-pages/:id', authenticateJWT, isAdmin, settingsController.getSeoPageById);
+router.put('/seo-pages/:id', authenticateJWT, isAdmin, settingsController.updateSeoPage);
+router.delete('/seo-pages/:id', authenticateJWT, isAdmin, settingsController.deleteSeoPage);
 
-router.put('/mobile-app/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid mobile config ID is required')
-], settingsController.updateMobileConfig);
+// Templates endpoints
+router.get('/templates', authenticateJWT, isAdmin, settingsController.listTemplates);
+router.post('/templates', authenticateJWT, isAdmin, settingsController.createTemplate);
+router.get('/templates/:id', authenticateJWT, isAdmin, settingsController.getTemplateById);
+router.put('/templates/:id', authenticateJWT, isAdmin, settingsController.updateTemplate);
+router.delete('/templates/:id', authenticateJWT, isAdmin, settingsController.deleteTemplate);
 
-router.delete('/mobile-app/:id', authenticateJWT, isAdmin, [
-    param('id').isMongoId().withMessage('Valid mobile config ID is required')
-], settingsController.deleteMobileConfig);
+// Mobile App endpoints
+router.get('/mobile-app', authenticateJWT, isAdmin, settingsController.listMobileConfigs);
+router.post('/mobile-app', authenticateJWT, isAdmin, settingsController.createMobileConfig);
+router.get('/mobile-app/:id', authenticateJWT, isAdmin, settingsController.getMobileConfigById);
+router.put('/mobile-app/:id', authenticateJWT, isAdmin, settingsController.updateMobileConfig);
+router.delete('/mobile-app/:id', authenticateJWT, isAdmin, settingsController.deleteMobileConfig);
 
 module.exports = router;
