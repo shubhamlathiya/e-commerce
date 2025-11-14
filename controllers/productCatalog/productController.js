@@ -12,6 +12,8 @@ const StockLog = require('../../models/productCatalog/stockLogModel');
 const Variant = require('../../models/productCatalog/productVariantModel');
 const FlashSale = require('../../models/offersAndDiscounts/flashSaleModel');
 const {deleteUploadedImage} = require('../../utils/upload');
+const {startSession} = require("mongoose");
+
 
 function slugify(text) {
     return String(text || '')
@@ -25,8 +27,8 @@ function slugify(text) {
 exports.createProduct = async (req, res) => {
     try {
         console.log("Creating product - req.body:", req.body);
-        console.log("req.processedImage:", req.processedImage);
-        console.log("req.processedImages:", req.processedImages);
+        // console.log("req.processedImage:", req.processedImage);
+        // console.log("req.processedImages:", req.processedImages);
 
         const {
             title,
@@ -39,92 +41,96 @@ exports.createProduct = async (req, res) => {
             status = true,
             isFeatured = false,
             tags = [],
+            // Pricing fields
+            basePrice,
+            discountType,
+            discountValue = 0,
+            currency = 'INR',
+            // Stock fields (for simple products)
+            stock = 0,
+            compareAtPrice,
+            barcode,
+            // Variant data (for variant products)
+            variants = []
         } = req.body;
 
+        // Parse category IDs
         let parsedCategoryIds = [];
-
         if (Array.isArray(categoryIds)) {
             parsedCategoryIds = categoryIds;
         } else if (typeof categoryIds === 'string') {
-            // Try parsing only if it looks like JSON (starts with [ or {)
             if (categoryIds.trim().startsWith('[') || categoryIds.trim().startsWith('{')) {
                 try {
                     parsedCategoryIds = JSON.parse(categoryIds);
                 } catch (err) {
-                    parsedCategoryIds = [categoryIds]; // fallback to single ID
+                    parsedCategoryIds = [categoryIds];
                 }
             } else {
-                parsedCategoryIds = [categoryIds]; // plain string ID
+                parsedCategoryIds = [categoryIds];
             }
         }
-        console.log("hy")
 
-        let parsedTags = []
-
+        // Parse tags
+        let parsedTags = [];
         if (Array.isArray(tags)) {
             parsedTags = tags;
         } else if (tags) {
             try {
                 parsedTags = JSON.parse(tags);
             } catch (e) {
-                parsedTags = [tags]; // if it's just a plain string like "hy"
+                parsedTags = [tags];
             }
         }
-        console.log("hy1")
+
+        // Parse variants if it's a string (from FormData)
+        let parsedVariants = [];
+        if (type === 'variant') {
+            if (Array.isArray(variants)) {
+                parsedVariants = variants;
+            } else if (typeof variants === 'string') {
+                try {
+                    parsedVariants = JSON.parse(variants);
+                } catch (err) {
+                    console.error("Error parsing variants JSON:", err);
+                    throw new Error('Invalid variants data format');
+                }
+            }
+
+            // Validate that we have variants for variant products
+            if (!Array.isArray(parsedVariants) || parsedVariants.length === 0) {
+                throw new Error('Variants array is required for variant products');
+            }
+        }
 
         const productSlug = slug || slugify(title);
 
         // Check for duplicate slug
-        const existingSlug = await Product.findOne({slug: productSlug});
+        const existingSlug = await Product.findOne({ slug: productSlug });
         if (existingSlug) {
-            // Clean up uploaded images if duplicate found
-            if (req.processedImage) {
-                await deleteUploadedImage("products", req.processedImage.filename);
-            }
-            if (req.processedImages) {
-                for (const img of req.processedImages) {
-                    await deleteUploadedImage("products", img.filename);
-                }
-            }
+            await cleanupUploadedImages(req);
             return res.status(400).json({
                 success: false,
                 message: "Product with this slug already exists"
             });
         }
-        console.log("hy2")
+
         // Check for duplicate SKU
         if (sku) {
-            const existingSku = await Product.findOne({sku});
+            const existingSku = await Product.findOne({ sku });
             if (existingSku) {
-                // Clean up uploaded images
-                if (req.processedImage) {
-                    await deleteUploadedImage("products", req.processedImage.filename);
-                }
-                if (req.processedImages) {
-                    for (const img of req.processedImages) {
-                        await deleteUploadedImage("products", img.filename);
-                    }
-                }
+                await cleanupUploadedImages(req);
                 return res.status(400).json({
                     success: false,
                     message: "Product with this SKU already exists"
                 });
             }
         }
-        console.log("hy4")
+
         // Validate brand
         if (brandId) {
             const brandExists = await Brand.findById(brandId);
             if (!brandExists) {
-                // Clean up uploaded images
-                if (req.processedImage) {
-                    await deleteUploadedImage("products", req.processedImage.filename);
-                }
-                if (req.processedImages) {
-                    for (const img of req.processedImages) {
-                        await deleteUploadedImage("products", img.filename);
-                    }
-                }
+                await cleanupUploadedImages(req);
                 return res.status(400).json({
                     success: false,
                     message: "Invalid brandId"
@@ -135,18 +141,10 @@ exports.createProduct = async (req, res) => {
         // Validate categories
         if (parsedCategoryIds.length > 0) {
             const validCategories = await Category.countDocuments({
-                _id: {$in: parsedCategoryIds}
+                _id: { $in: parsedCategoryIds }
             });
             if (validCategories !== parsedCategoryIds.length) {
-                // Clean up uploaded images
-                if (req.processedImage) {
-                    await deleteUploadedImage("products", req.processedImage.filename);
-                }
-                if (req.processedImages) {
-                    for (const img of req.processedImages) {
-                        await deleteUploadedImage("products", img.filename);
-                    }
-                }
+                await cleanupUploadedImages(req);
                 return res.status(400).json({
                     success: false,
                     message: "One or more category IDs are invalid"
@@ -162,7 +160,7 @@ exports.createProduct = async (req, res) => {
         const productStatus = status === "true" || status === true;
         const productIsFeatured = isFeatured === "true" || isFeatured === true;
 
-        // Create product
+        // Create main product
         const newProduct = await Product.create({
             title: title.trim(),
             slug: productSlug,
@@ -178,21 +176,190 @@ exports.createProduct = async (req, res) => {
             tags: parsedTags,
         });
 
+        // Handle product creation based on type
+        if (type === 'simple') {
+            await handleSimpleProductCreation(newProduct, {
+                basePrice,
+                discountType,
+                discountValue,
+                currency,
+                stock,
+                compareAtPrice,
+                barcode
+            });
+        } else if (type === 'variant') {
+            await handleVariantProductCreation(newProduct, parsedVariants);
+        }
+
         // Populate references for response
         const populatedProduct = await Product.findById(newProduct._id)
             .populate('brandId', 'name slug')
             .populate('categoryIds', 'name slug')
             .lean();
-        console.log(populatedProduct)
+
         return res.status(201).json({
             success: true,
             message: "Product created successfully",
             data: populatedProduct,
         });
+
     } catch (err) {
         console.error("Error creating product:", err);
 
         // Clean up uploaded images on error
+        await cleanupUploadedImages(req);
+
+        return res.status(500).json({
+            success: false,
+            message: err.message
+        });
+    }
+};
+// Helper function for simple product creation
+async function handleSimpleProductCreation(product, pricingData) {
+    const { basePrice, discountType, discountValue, currency, stock, compareAtPrice, barcode, attributes } = pricingData;
+
+    // Validate required pricing data for simple products
+    if (!basePrice && basePrice !== 0) {
+        throw new Error('basePrice is required for simple products');
+    }
+
+    // Generate SKU if not provided
+    const variantSku = product.sku || `SKU-${product.slug}-${Date.now()}`;
+
+    // Create product variant for simple product
+    const variant = await ProductVariant.create({
+        productId: product._id,
+        sku: variantSku,
+        attributes: attributes || [], // Use provided attributes or empty array
+        price: basePrice, // Store base price in variant
+        compareAtPrice: compareAtPrice || null,
+        stock: parseInt(stock) || 0,
+        barcode: barcode || null,
+        status: product.status
+    });
+
+    // Create pricing record
+    await ProductPricing.create({
+        productId: product._id,
+        variantId: variant._id, // Link to the created variant
+        basePrice: parseFloat(basePrice),
+        discountType: discountType || null,
+        discountValue: parseFloat(discountValue) || 0,
+        finalPrice: computeFinalPrice(basePrice, discountType, discountValue),
+        currency: currency || 'INR',
+        status: product.status
+    });
+}
+
+// Helper function for variant product creation
+async function handleVariantProductCreation(product, variants) {
+    // console.log("Processing variants:", JSON.stringify(variants, null, 2));
+
+    if (!variants || !Array.isArray(variants) || variants.length === 0) {
+        throw new Error('Variants array is required for variant products');
+    }
+
+    // Check for duplicate SKUs in variants
+    const variantSkus = variants.map(v => v.sku).filter(Boolean);
+    const uniqueSkus = new Set(variantSkus);
+    if (variantSkus.length !== uniqueSkus.size) {
+        throw new Error('Duplicate SKUs found in variants');
+    }
+
+    // Check for existing SKUs in database
+    const existingVariants = await ProductVariant.find({
+        sku: { $in: variantSkus }
+    });
+
+    if (existingVariants.length > 0) {
+        throw new Error('One or more variant SKUs already exist');
+    }
+
+    // Create variants and pricing records
+    for (const variantData of variants) {
+        // console.log("Processing variant:", variantData.sku);
+        // console.log("Variant attributes:", variantData.attributes, "Type:", typeof variantData.attributes);
+
+        let { sku, attributes, price, compareAtPrice, stock, barcode, basePrice, discountType, discountValue = 0, currency = 'INR' } = variantData;
+
+        if (!sku || (price === undefined && basePrice === undefined)) {
+            throw new Error('SKU and price are required for each variant');
+        }
+
+        // Parse attributes if it's a string
+        let parsedAttributes = [];
+        if (Array.isArray(attributes)) {
+            parsedAttributes = attributes;
+        } else if (typeof attributes === 'string') {
+            try {
+                parsedAttributes = JSON.parse(attributes);
+            } catch (err) {
+                console.error("Error parsing attributes JSON:", err);
+                // If parsing fails, try to handle it as a simple string
+                parsedAttributes = [];
+            }
+        }
+
+        // Ensure attributes have the correct structure for Mongoose
+        const validAttributes = parsedAttributes.map(attr => {
+            if (typeof attr === 'object' && attr !== null && attr.name && attr.value) {
+                return {
+                    name: String(attr.name || ''),
+                    value: String(attr.value || '')
+                };
+            }
+            return null;
+        }).filter(attr => attr !== null);
+
+        console.log("Valid attributes:", validAttributes);
+
+        // Use price if basePrice not provided
+        const actualBasePrice = basePrice !== undefined ? basePrice : price;
+        const actualPrice = price !== undefined ? price : computeFinalPrice(actualBasePrice, discountType, discountValue);
+
+        // Create variant
+        const variant = await ProductVariant.create({
+            productId: product._id,
+            sku: sku.trim(),
+            attributes: validAttributes,
+            price: parseFloat(actualPrice),
+            compareAtPrice: compareAtPrice ? parseFloat(compareAtPrice) : null,
+            stock: parseInt(stock) || 0,
+            barcode: barcode || null,
+            status: product.status
+        });
+
+        // console.log("Variant created:", variant._id);
+
+        // Create pricing record for variant
+        await ProductPricing.create({
+            productId: product._id,
+            variantId: variant._id,
+            basePrice: parseFloat(actualBasePrice),
+            discountType: discountType || null,
+            discountValue: parseFloat(discountValue) || 0,
+            finalPrice: computeFinalPrice(actualBasePrice, discountType, discountValue),
+            currency: currency || 'INR',
+            status: product.status
+        });
+    }
+}
+
+// Helper function to compute final price
+function computeFinalPrice(basePrice, discountType, discountValue) {
+    let price = parseFloat(basePrice);
+    if (discountType === 'flat') {
+        price = Math.max(0, price - parseFloat(discountValue || 0));
+    } else if (discountType === 'percent') {
+        price = price * (1 - Math.min(100, parseFloat(discountValue || 0)) / 100);
+    }
+    return Number(price.toFixed(2));
+}
+
+// Helper function to clean up uploaded images
+async function cleanupUploadedImages(req) {
+    try {
         if (req.processedImage) {
             await deleteUploadedImage("products", req.processedImage.filename);
         }
@@ -201,17 +368,14 @@ exports.createProduct = async (req, res) => {
                 await deleteUploadedImage("products", img.filename);
             }
         }
-
-        return res.status(500).json({
-            success: false,
-            message: err.message
-        });
+    } catch (error) {
+        console.error("Error cleaning up uploaded images:", error);
     }
-};
+}
 
 exports.getProduct = async (req, res) => {
     try {
-        const { id } = req.params;
+        const {id} = req.params;
 
         // Fetch product with brand and category populated
         const doc = await Product.findById(id)
@@ -227,7 +391,7 @@ exports.getProduct = async (req, res) => {
         }
 
         // Fetch related variants for this product
-        const variants = await Variant.find({ productId: id })
+        const variants = await Variant.find({productId: id})
             .select('name price stock sku attributes images')
             .lean();
 
@@ -292,8 +456,8 @@ exports.listProducts = async (req, res) => {
         // Handle text search
         if (search) {
             query.$or = [
-                { title: { $regex: search, $options: 'i' } },
-                { description: { $regex: search, $options: 'i' } },
+                {title: {$regex: search, $options: 'i'}},
+                {description: {$regex: search, $options: 'i'}},
             ];
         }
 
@@ -315,10 +479,10 @@ exports.listProducts = async (req, res) => {
         const productIds = products.map(p => p._id);
 
         const [pricingList, variantsList] = await Promise.all([
-            ProductPricing.find({ productId: { $in: productIds }, status: true })
+            ProductPricing.find({productId: {$in: productIds}, status: true})
                 .select('productId variantId basePrice finalPrice discountType discountValue')
                 .lean(),
-            Variant.find({ productId: { $in: productIds } })
+            Variant.find({productId: {$in: productIds}})
                 .select('productId name sku attributes stock status')
                 .lean(),
         ]);
@@ -353,7 +517,7 @@ exports.listProducts = async (req, res) => {
             };
         });
 
-        console.log(items)
+        // console.log(items)
         // Response
         return res.status(200).json({
             success: true,
@@ -378,8 +542,8 @@ exports.listProducts = async (req, res) => {
 
 exports.updateProduct = async (req, res) => {
     try {
-        const { id } = req.params;
-        console.log("Updating product - req.body:", req.body);
+        const {id} = req.params;
+        // console.log("Updating product - req.body:", req.body);
 
         // Check if product exists
         const existingProduct = await Product.findById(id);
@@ -446,7 +610,7 @@ exports.updateProduct = async (req, res) => {
         // Check duplicate slug (excluding same product)
         const existingSlug = await Product.findOne({
             slug: productSlug,
-            _id: { $ne: id },
+            _id: {$ne: id},
         });
         if (existingSlug) {
             if (req.processedImage) await deleteUploadedImage("products", req.processedImage.filename);
@@ -465,7 +629,7 @@ exports.updateProduct = async (req, res) => {
         if (sku) {
             const existingSku = await Product.findOne({
                 sku,
-                _id: { $ne: id },
+                _id: {$ne: id},
             });
             if (existingSku) {
                 if (req.processedImage) await deleteUploadedImage("products", req.processedImage.filename);
@@ -501,7 +665,7 @@ exports.updateProduct = async (req, res) => {
         // -------- Validate categories --------
         if (parsedCategoryIds.length > 0) {
             const validCategories = await Category.countDocuments({
-                _id: { $in: parsedCategoryIds },
+                _id: {$in: parsedCategoryIds},
             });
             if (validCategories !== parsedCategoryIds.length) {
                 if (req.processedImage) await deleteUploadedImage("products", req.processedImage.filename);

@@ -151,7 +151,7 @@ router.put('/item/:itemId',
  *       404:
  *         description: Item not found
  */
-router.delete('/item/:itemId',
+router.delete('/item',
     [
         check('sessionId').optional().isString()
     ],
