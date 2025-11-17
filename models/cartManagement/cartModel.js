@@ -11,6 +11,10 @@ const CartItemSchema = new Schema({
         type: Schema.Types.ObjectId,
         ref: 'Variant'
     },
+    shippingCharge: {
+        type: Number,
+        default: 0
+    },
     quantity: {
         type: Number,
         required: true,

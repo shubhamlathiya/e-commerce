@@ -131,6 +131,22 @@ exports.updateRule = async (req, res) => {
     }
 };
 
+exports.toggleRuleStatus = async (req, res) => {
+    try {
+        const {id} = req.params;
+        const {status} = req.body;
+        const rule = await ShippingRule.findById(id);
+        if (!rule) {
+            return res.status(404).json({success: false, message: 'Shipping rule not found'});
+        }
+        rule.status = typeof status === 'boolean' ? status : !rule.status;
+        await rule.save();
+        return res.status(200).json({success: true, message: 'Shipping rule status updated', data: rule});
+    } catch (error) {
+        return res.status(500).json({success: false, message: 'Error updating status', error: error.message});
+    }
+};
+
 /**
  * Delete shipping rule
  */
@@ -291,13 +307,14 @@ exports.getZoneById = async (req, res) => {
  */
 exports.createZone = async (req, res) => {
     try {
-        const {zoneName, countries, states, pincodes} = req.body;
+        const {zoneName, countries, states, pincodes, marketFees} = req.body;
 
         const zone = new ShippingZone({
             zoneName,
             countries: countries || [],
             states: states || [],
-            pincodes: pincodes || []
+            pincodes: pincodes || [],
+            marketFees: marketFees || 0
         });
 
         await zone.save();
@@ -321,7 +338,7 @@ exports.createZone = async (req, res) => {
  */
 exports.updateZone = async (req, res) => {
     try {
-        const {zoneName, countries, states, pincodes} = req.body;
+        const {zoneName, countries, states, pincodes, marketFees} = req.body;
 
         const zone = await ShippingZone.findById(req.params.id);
 
@@ -336,6 +353,9 @@ exports.updateZone = async (req, res) => {
         if (countries) zone.countries = countries;
         if (states) zone.states = states;
         if (pincodes) zone.pincodes = pincodes;
+
+        // ⭐ Update new field
+        if (marketFees !== undefined) zone.marketFees = marketFees;
 
         await zone.save();
 

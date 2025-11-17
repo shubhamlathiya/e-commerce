@@ -264,23 +264,6 @@ router.patch(
     authenticateJWT,
     isAdmin,
     combinedImageUpload("products"),
-    // singleImageUpload("thumbnail", "products"),
-    // multipleImageUpload("images", "products", 10),
-    // [
-    //     param('id').isMongoId(),
-    //     body('title').optional().isString().isLength({min: 3, max: 100}),
-    //     body('description').optional().isString().isLength({max: 2000}),
-    //     body('slug').optional().isString().matches(/^[a-z0-9-]+$/),
-    //     body('brandId').optional().isMongoId(),
-    //     body('categoryIds').optional().isArray(),
-    //     body('categoryIds.*').optional().isMongoId(),
-    //     body('type').optional().isIn(['simple', 'variable']),
-    //     body('sku').optional().isString(),
-    //     body('status').optional().isBoolean(),
-    //     body('isFeatured').optional().isBoolean(),
-    //     body('tags').optional().isArray(),
-    //     body('tags.*').optional().isString(),
-    // ],
     validate,
     productController.updateProduct
 );

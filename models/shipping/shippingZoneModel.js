@@ -12,39 +12,30 @@ const Schema = mongoose.Schema;
  *       properties:
  *         _id:
  *           type: string
- *           example: "6721a3f9cde123456789abcd"
  *         zoneName:
  *           type: string
- *           description: Name of the shipping zone
- *           example: "West India Zone"
  *         countries:
  *           type: array
- *           description: List of countries included in this shipping zone
  *           items:
  *             type: string
- *             example: "India"
  *         states:
  *           type: array
- *           description: List of states included in this shipping zone
  *           items:
  *             type: string
- *             example: "Maharashtra"
  *         pincodes:
  *           type: array
- *           description: List of pincodes covered by this zone
  *           items:
  *             type: string
- *             example: "400001"
+ *         marketFees:
+ *           type: number
+ *           description: Additional marketplace fees applied for this zone
+ *           example: 15.50
  *         createdAt:
  *           type: string
  *           format: date-time
- *           description: Date when the shipping zone was created
- *           example: "2025-10-28T10:00:00Z"
  *         updatedAt:
  *           type: string
  *           format: date-time
- *           description: Date when the shipping zone was last updated
- *           example: "2025-10-28T12:15:00Z"
  */
 const ShippingZoneSchema = new Schema({
     zoneName: {
@@ -64,6 +55,13 @@ const ShippingZoneSchema = new Schema({
         type: String,
         trim: true
     }],
+
+    // ⭐ NEW FIELD ADDED
+    marketFees: {
+        type: Number,
+        default: 0
+    },
+
     createdAt: {
         type: Date,
         default: Date.now
@@ -74,7 +72,7 @@ const ShippingZoneSchema = new Schema({
     }
 });
 
-// Update the updatedAt field on save
+// Update updatedAt on save
 ShippingZoneSchema.pre('save', function(next) {
     this.updatedAt = Date.now();
     next();

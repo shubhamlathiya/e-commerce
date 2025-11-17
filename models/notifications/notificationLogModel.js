@@ -63,6 +63,10 @@ const NotificationLogSchema = new Schema({
         enum: ['sent', 'failed'],
         required: true
     },
+    read: {
+        type: Boolean,
+        default: false
+    },
     createdAt: {
         type: Date,
         default: Date.now

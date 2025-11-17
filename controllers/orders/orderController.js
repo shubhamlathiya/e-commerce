@@ -11,6 +11,8 @@ const Refund = require('../../models/orders/refundModel');
 const User = require('../../models/auth/userModel');
 const Variant = require('../../models/productCatalog/productVariantModel');
 const nodemailer = require('nodemailer');
+const { createNotification } = require('../notifications/notificationController');
+const { calculateShipping } = require('../../utils/shipping/calculateShipping');
 
 /**
  * Create a new order from cart
@@ -19,7 +21,7 @@ exports.createOrder = async (req, res) => {
     try {
         const userId = req.user?.id;
         const {
-            cartId, paymentMethod, shippingAddress, addressId, billingAddress = null, notes = ''
+            cartId, paymentMethod, shippingAddress, addressId, billingAddress = null, notes = '', summaryId
         } = req.body;
 
         // Find the cart
@@ -30,11 +32,26 @@ exports.createOrder = async (req, res) => {
             });
         }
 
-        // Get order summary
-        const orderSummary = await OrderSummary.findOne({cartId});
+        // Get order summary (prefer summaryId if provided)
+        let orderSummary = null;
+        if (summaryId) {
+            orderSummary = await OrderSummary.findById(summaryId);
+        }
+        if (!orderSummary) {
+            orderSummary = await OrderSummary.findOne({cartId});
+        }
         if (!orderSummary) {
             return res.status(404).json({
                 success: false, message: 'Order summary not found. Please generate summary first.'
+            });
+        }
+
+        // Validate summary freshness (15 minutes)
+        const maxAgeMs = 15 * 60 * 1000;
+        const age = Date.now() - new Date(orderSummary.createdAt).getTime();
+        if (age > maxAgeMs) {
+            return res.status(400).json({
+                success: false, message: 'Order summary expired. Please regenerate.'
             });
         }
 
@@ -58,6 +75,10 @@ exports.createOrder = async (req, res) => {
             };
         }
 
+        // Recalculate shipping server-side to avoid tampering
+        const calcShip = await calculateShipping(cart, finalShippingAddress);
+        const shippingCost = calcShip.shippingTotal;
+
         // Create new order - will auto-generate orderNumber in pre-save hook
         const order = new Order({
             userId: userId || null,
@@ -76,9 +97,9 @@ exports.createOrder = async (req, res) => {
             totals: {
                 subtotal: orderSummary.subtotal,
                 discount: orderSummary.discount,
-                shipping: orderSummary.shipping,
+                shipping: shippingCost,
                 tax: orderSummary.tax,
-                grandTotal: orderSummary.total
+                grandTotal: Number((orderSummary.subtotal + shippingCost + orderSummary.tax - orderSummary.discount).toFixed(2))
             },
             status: 'placed',
             couponCode: cart.couponCode,
@@ -96,10 +117,7 @@ exports.createOrder = async (req, res) => {
 
         // Create notification log
         if (userId) {
-            const notification = new NotificationLog({
-                userId, type: 'email', template: 'order_confirmation', orderId: order._id, status: 'sent'
-            });
-            await notification.save();
+            await createNotification(userId, 'email', 'order_confirmation', order._id, 'sent');
         }
 
         // Clear the cart
@@ -783,7 +801,7 @@ exports.generateOrderSummary = async (req, res) => {
             cart = await Cart.findOne(cartQuery)
                 .populate({
                     path: 'items.productId',
-                    select: 'title name images price mrp discount finalPrice brandId categoryIds description',
+                    select: 'title images price mrp discount finalPrice brandId categoryIds description',
                     populate: {
                         path: 'brandId', select: 'name logo'
                     }
@@ -895,34 +913,8 @@ exports.generateOrderSummary = async (req, res) => {
             };
         }
 
-        // Calculate shipping cost
-        let shippingCost = 0;
-        if (resolvedShippingAddress) {
-            const {country, state, pincode} = resolvedShippingAddress;
-
-            // Find applicable shipping rule
-            const shippingRule = await ShippingRule.findOne({
-                minOrderValue: {$lte: subtotal},
-                maxOrderValue: {$gte: subtotal},
-                country,
-                state,
-                postalCodes: pincode,
-                status: true
-            });
-
-            if (shippingRule) {
-                shippingCost = shippingRule.shippingCost;
-            } else {
-                // Default shipping rule
-                const defaultRule = await ShippingRule.findOne({
-                    status: true
-                }).sort({shippingCost: 1});
-
-                if (defaultRule) {
-                    shippingCost = defaultRule.shippingCost;
-                }
-            }
-        }
+        const shipCalc = await calculateShipping(cart, resolvedShippingAddress);
+        const shippingCost = shipCalc.shippingTotal;
 
         // Calculate tax (example: 5% of subtotal)
         const taxRate = 0.05;
@@ -940,7 +932,10 @@ exports.generateOrderSummary = async (req, res) => {
         const summaryData = {
             cartId,
             userId: userId || null,
-            items: detailedItems,
+            items: detailedItems.map(it => ({
+                ...it,
+                shippingClassId: (cart.items.find(ci => String(ci.productId) === String(it.productId))?.shippingClassId) || null
+            })),
             subtotal,
             shipping: shippingCost,
             discount: cart.discount || 0,
@@ -965,10 +960,10 @@ exports.generateOrderSummary = async (req, res) => {
                 ...orderSummary.toObject(), summary: {
                     totalItems,
                     subtotal: `$${subtotal.toFixed(2)}`,
-                    shipping: `$${shippingCost.toFixed(2)}`,
-                    tax: `$${tax.toFixed(2)}`,
-                    discount: `$${(cart.discount || 0).toFixed(2)}`,
-                    total: `$${total.toFixed(2)}`
+                shipping: `$${shippingCost.toFixed(2)}`,
+                tax: `$${tax.toFixed(2)}`,
+                discount: `$${(cart.discount || 0).toFixed(2)}`,
+                total: `$${total.toFixed(2)}`
                 }
             }
         });
@@ -1363,9 +1358,9 @@ exports.sendInvoice = async (req, res) => {
         }
 
         // Log notification result
-        await new NotificationLog({
-            userId: order.userId, type: 'email', template: 'invoice', orderId: id, status: sent ? 'sent' : 'failed',
-        }).save();
+        if (order.userId) {
+            await createNotification(order.userId, 'email', 'invoice', id, sent ? 'sent' : 'failed');
+        }
 
         if (sent) {
             return res.status(200).json({success: true, message: 'Invoice email sent successfully'});

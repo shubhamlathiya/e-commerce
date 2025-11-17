@@ -39,6 +39,7 @@ const analyticsRoutes = require('././analytics/analyticsRoutes');
 const settingsRoutes = require('././settings/settingsRoutes');
 const supportRoutes = require('././support/supportRoutes');
 const refundRoutes = require('././orders/refundRoutes');
+const notificationRoutes = require('././notifications/notificationRoutes');
 
 // Auth routes
 router.use('/api/auth', authRoutes);
@@ -76,6 +77,7 @@ router.use('/api/shipping', shippingRoutes);
 router.use('/api/address', addressRoutes);
 router.use('/api/payments', paymentRoutes);
 router.use('/api/orders', orderRoutes);
+router.use('/api/order', orderRoutes);
 router.use('/api/wallet', walletRoutes);
 
 router.use('/api/marketing', marketingRoutes);
@@ -83,6 +85,7 @@ router.use('/api/analytics', analyticsRoutes);
 router.use('/api/settings', settingsRoutes);
 router.use('/api/support', supportRoutes);
 router.use('/api/refunds', refundRoutes);
+router.use('/api/notifications', notificationRoutes);
 
 // Admin routes
 router.use('/api/admin', adminRoutes);

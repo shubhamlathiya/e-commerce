@@ -1,5 +1,5 @@
 const mongoose = require('mongoose');
-const { Schema } = mongoose;
+const {Schema} = mongoose;
 
 const ProductSchema = new Schema(
     {
@@ -60,22 +60,28 @@ const ProductSchema = new Schema(
         tags: [{
             type: String,
             trim: true
-        }]
+        }],
+        shipping: {
+            class: {type: String, trim: true},
+            cost: {type: Number, min: 0},
+            estimated: {type: String, trim: true}
+        }
     },
     {
         timestamps: true,
-        toJSON: { virtuals: true },
-        toObject: { virtuals: true }
+        toJSON: {virtuals: true},
+        toObject: {virtuals: true}
     }
 );
 
 // Index for better query performance
-ProductSchema.index({ slug: 1 });
-ProductSchema.index({ sku: 1 }, { sparse: true });
-ProductSchema.index({ brandId: 1, status: 1 });
-ProductSchema.index({ categoryIds: 1, status: 1 });
-ProductSchema.index({ isFeatured: 1, status: 1 });
-ProductSchema.index({ title: 'text', description: 'text' });
+ProductSchema.index({slug: 1});
+ProductSchema.index({sku: 1}, {sparse: true});
+ProductSchema.index({brandId: 1, status: 1});
+ProductSchema.index({categoryIds: 1, status: 1});
+ProductSchema.index({isFeatured: 1, status: 1});
+ProductSchema.index({title: 'text', description: 'text'});
+ProductSchema.index({shippingClassId: 1, status: 1});
 
 // Virtual for product gallery
 ProductSchema.virtual('gallery', {
@@ -86,11 +92,11 @@ ProductSchema.virtual('gallery', {
 });
 
 // Pre-save middleware to ensure slug is unique
-ProductSchema.pre('save', async function(next) {
+ProductSchema.pre('save', async function (next) {
     if (this.isModified('slug')) {
         const existing = await mongoose.model('Product').findOne({
             slug: this.slug,
-            _id: { $ne: this._id }
+            _id: {$ne: this._id}
         });
         if (existing) {
             const error = new Error('Product with this slug already exists');

@@ -16,7 +16,10 @@ exports.createCategory = async (req, res) => {
     try {
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
-            return res.status(400).json({success: false, errors: errors.array()});
+            return res.status(400).json({
+                success: false,
+                errors: errors.array()
+            });
         }
 
         const {
@@ -33,10 +36,14 @@ exports.createCategory = async (req, res) => {
         } = req.body;
 
         let finalSlug = slug || slugify(name);
-        // Ensure slug uniqueness
-        const existingSlug = await Category.findOne({slug: finalSlug});
+
+        // Check slug uniqueness
+        const existingSlug = await Category.findOne({ slug: finalSlug });
         if (existingSlug) {
-            return res.status(409).json({success: false, message: 'Slug already exists'});
+            return res.status(409).json({
+                success: false,
+                message: 'Slug already exists'
+            });
         }
 
         // Validate parent
@@ -44,18 +51,25 @@ exports.createCategory = async (req, res) => {
         if (parentId) {
             const parent = await Category.findById(parentId);
             if (!parent) {
-                return res.status(400).json({success: false, message: 'Invalid parentId'});
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid parentId'
+                });
             }
             level = parent.level + 1;
         }
+
+        // Pick uploaded files or fallback to body icon/image
+        const iconPath = req.categoryIcon?.path || icon || null;
+        const imagePath = req.categoryImage?.path || image || null;
 
         const category = await Category.create({
             name,
             slug: finalSlug,
             parentId: parentId || null,
             level,
-            icon: (req.processedCategoryIcon?.original || icon) || null,
-            image: (req.processedCategoryImage?.original || image) || null,
+            icon: iconPath,
+            image: imagePath,
             status,
             sortOrder,
             isFeatured,
@@ -63,10 +77,16 @@ exports.createCategory = async (req, res) => {
             metaDescription,
         });
 
-        return res.status(201).json({success: true, data: category});
+        return res.status(201).json({
+            success: true,
+            data: category
+        });
     } catch (error) {
         console.error('Create category error:', error);
-        return res.status(500).json({success: false, message: 'Server error'});
+        return res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
     }
 };
 
@@ -131,21 +151,38 @@ exports.listCategories = async (req, res) => {
 
 exports.updateCategory = async (req, res) => {
     try {
-        const {id} = req.params;
-        const updates = {...req.body};
+        const { id } = req.params;
+        const updates = { ...req.body };
 
+        // Generate slug if name changed and slug not provided
         if (updates.name && !updates.slug) {
             updates.slug = slugify(updates.name);
         }
+
+        // Check slug uniqueness
         if (updates.slug) {
-            const exists = await Category.findOne({slug: updates.slug, _id: {$ne: id}});
-            if (exists) return res.status(409).json({success: false, message: 'Slug already exists'});
+            const exists = await Category.findOne({
+                slug: updates.slug,
+                _id: { $ne: id }
+            });
+            if (exists) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Slug already exists'
+                });
+            }
         }
 
+        // Parent update logic
         if (typeof updates.parentId !== 'undefined') {
             if (updates.parentId) {
                 const parent = await Category.findById(updates.parentId);
-                if (!parent) return res.status(400).json({success: false, message: 'Invalid parentId'});
+                if (!parent) {
+                    return res.status(400).json({
+                        success: false,
+                        message: 'Invalid parentId'
+                    });
+                }
                 updates.level = parent.level + 1;
             } else {
                 updates.level = 0;
@@ -153,32 +190,56 @@ exports.updateCategory = async (req, res) => {
             }
         }
 
-        // Handle uploaded media replacements
+        // Fetch existing category
         const existing = await Category.findById(id);
-        if (!existing) return res.status(404).json({success: false, message: 'Not found'});
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: 'Not found'
+            });
+        }
 
-        if (req.processedCategoryImage?.original) {
+        /* -----------------------------------------------------
+           Handle uploaded IMAGE update
+        ----------------------------------------------------- */
+        if (req.categoryImage?.path) {
             if (existing.image) {
-                const oldFilename = String(existing.image).split('/').pop();
+                const oldFilename = existing.image.split('/').pop();
                 await deleteUploadedImage('categories', oldFilename);
             }
-            updates.image = req.processedCategoryImage.original;
+            updates.image = req.categoryImage.path;
         }
 
-        if (req.processedCategoryIcon?.original) {
+        /* -----------------------------------------------------
+           Handle uploaded ICON update
+        ----------------------------------------------------- */
+        if (req.categoryIcon?.path) {
             if (existing.icon) {
-                const oldIconFilename = String(existing.icon).split('/').pop();
-                await deleteUploadedImage('categories', oldIconFilename);
+                const oldIcon = existing.icon.split('/').pop();
+                await deleteUploadedImage('categories', oldIcon);
             }
-            updates.icon = req.processedCategoryIcon.original;
+            updates.icon = req.categoryIcon.path;
         }
 
-        const category = await Category.findByIdAndUpdate(id, updates, {new: true});
-        if (!category) return res.status(404).json({success: false, message: 'Not found'});
-        return res.status(200).json({success: true, data: category});
+        // Update category
+        const category = await Category.findByIdAndUpdate(id, updates, { new: true });
+        if (!category) {
+            return res.status(404).json({
+                success: false,
+                message: 'Not found'
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: category
+        });
     } catch (error) {
         console.error('Update category error:', error);
-        return res.status(500).json({success: false, message: 'Server error'});
+        return res.status(500).json({
+            success: false,
+            message: 'Server error'
+        });
     }
 };
 

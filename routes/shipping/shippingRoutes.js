@@ -266,6 +266,15 @@ router.put('/rules/:id',
     shippingController.updateRule
 );
 
+router.patch('/rules/:id/status',
+    authenticateJWT,
+    isAdmin,
+    [
+        check('status').optional().isBoolean()
+    ],
+    shippingController.toggleRuleStatus
+);
+
 /**
  * @swagger
  * /api/shipping/rules/{id}:

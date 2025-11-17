@@ -17,7 +17,7 @@ exports.createBrand = async (req, res) => {
         const {
             name,
             slug,
-            logo, // may come as URL
+            logo, // may come as URL or plain text
             description,
             website,
             status = true,
@@ -31,37 +31,41 @@ exports.createBrand = async (req, res) => {
         }
 
         let finalLogoPath = null;
-        let processedImageData = null;
         const brandUploadPath = path.join(UPLOAD_DIR, "brands");
 
-        // ✅ Case 1: File uploaded via multipart form (req.file)
-        if (req.file) {
-            processedImageData = await processImage(req.file, "brands");
-            finalLogoPath = processedImageData.original;
+        // ------------------------------------------
+        // CASE 1: Uploaded file (multer)
+        // ------------------------------------------
+        if (req.brandLogo?.path) {
+            finalLogoPath = req.brandLogo.path;
         }
 
-        // ✅ Case 2: Logo is a valid external URL
+            // ------------------------------------------
+            // CASE 2: External URL
+        // ------------------------------------------
         else if (logo && /^https?:\/\/.+/i.test(logo)) {
             const fileExt = path.extname(new URL(logo).pathname) || ".jpg";
             const fileName = `brand-${Date.now()}${fileExt}`;
             const filePath = path.join(brandUploadPath, fileName);
 
-            // Ensure folder exists
-            if (!fs.existsSync(brandUploadPath)) fs.mkdirSync(brandUploadPath, { recursive: true });
+            if (!fs.existsSync(brandUploadPath)) {
+                fs.mkdirSync(brandUploadPath, { recursive: true });
+            }
 
             const response = await axios.get(logo, { responseType: "arraybuffer" });
             fs.writeFileSync(filePath, response.data);
 
-            processedImageData = await processImage({ path: filePath, filename: fileName }, "brands");
-            finalLogoPath = processedImageData.original;
+            finalLogoPath = `/uploads/brands/${fileName}`;
         }
 
-        // ✅ Case 3: Logo provided as plain text (fallback)
+            // ------------------------------------------
+            // CASE 3: Plain text value (fallback)
+        // ------------------------------------------
         else if (logo && !/^blob:/i.test(logo)) {
             finalLogoPath = logo.trim();
         }
 
-        // Create brand record
+        // Create brand
         const brand = await Brand.create({
             name,
             slug: finalSlug,
@@ -77,14 +81,9 @@ exports.createBrand = async (req, res) => {
             message: "Brand created successfully",
             data: brand,
         });
+
     } catch (error) {
         console.error("Create brand error:", error);
-
-        // Try cleaning up temporary upload if available
-        if (req.file?.path && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-        }
-
         return res.status(500).json({
             success: false,
             message: "Server error while creating brand",
@@ -129,17 +128,93 @@ exports.updateBrand = async (req, res) => {
     try {
         const { id } = req.params;
         const updates = { ...req.body };
-        if (updates.name && !updates.slug) updates.slug = slugify(updates.name);
-        if (updates.slug) {
-            const exists = await Brand.findOne({ slug: updates.slug, _id: { $ne: id } });
-            if (exists) return res.status(409).json({ success: false, message: 'Slug already exists' });
+
+        const existingBrand = await Brand.findById(id);
+        if (!existingBrand) {
+            return res.status(404).json({ success: false, message: 'Not found' });
         }
-        const brand = await Brand.findByIdAndUpdate(id, updates, { new: true });
-        if (!brand) return res.status(404).json({ success: false, message: 'Not found' });
-        return res.status(200).json({ success: true, data: brand });
+
+        // Slug logic
+        if (updates.name && !updates.slug) {
+            updates.slug = slugify(updates.name);
+        }
+
+        if (updates.slug) {
+            const exists = await Brand.findOne({
+                slug: updates.slug,
+                _id: { $ne: id }
+            });
+            if (exists) {
+                return res.status(409).json({
+                    success: false,
+                    message: 'Slug already exists'
+                });
+            }
+        }
+
+        let newLogoPath = null;
+
+        // --------------------------------------------------
+        // CASE 1: Uploaded logo (multer)
+        // --------------------------------------------------
+        if (req.brandLogo?.path) {
+            newLogoPath = req.brandLogo.path;
+
+            // Delete old logo file if exists
+            if (existingBrand.logo) {
+                const oldFilename = existingBrand.logo.split("/").pop();
+                await deleteUploadedImage("brands", oldFilename);
+            }
+        }
+
+            // --------------------------------------------------
+            // CASE 2: External image URL
+        // --------------------------------------------------
+        else if (updates.logo && /^https?:\/\/.+/i.test(updates.logo)) {
+            const brandUploadPath = path.join(UPLOAD_DIR, "brands");
+            const fileExt = path.extname(new URL(updates.logo).pathname) || ".jpg";
+            const fileName = `brand-${Date.now()}${fileExt}`;
+            const filePath = path.join(brandUploadPath, fileName);
+
+            if (!fs.existsSync(brandUploadPath)) {
+                fs.mkdirSync(brandUploadPath, { recursive: true });
+            }
+
+            const response = await axios.get(updates.logo, { responseType: "arraybuffer" });
+            fs.writeFileSync(filePath, response.data);
+
+            newLogoPath = `/uploads/brands/${fileName}`;
+
+            // Delete old logo
+            if (existingBrand.logo) {
+                const oldFilename = existingBrand.logo.split("/").pop();
+                await deleteUploadedImage("brands", oldFilename);
+            }
+        }
+
+            // --------------------------------------------------
+            // CASE 3: Plain text assigned directly
+        // --------------------------------------------------
+        else if (updates.logo && !/^blob:/i.test(updates.logo)) {
+            newLogoPath = updates.logo.trim();
+        }
+
+        // Apply final logo value
+        if (newLogoPath !== null) {
+            updates.logo = newLogoPath;
+        }
+
+        const updatedBrand = await Brand.findByIdAndUpdate(id, updates, { new: true });
+
+        return res
+            .status(200)
+            .json({ success: true, data: updatedBrand });
+
     } catch (error) {
         console.error('Update brand error:', error);
-        return res.status(500).json({ success: false, message: 'Server error' });
+        return res
+            .status(500)
+            .json({ success: false, message: 'Server error' });
     }
 };
 

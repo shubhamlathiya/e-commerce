@@ -11,8 +11,10 @@ const SpecialPricing = require('../../models/productPricingAndTaxation/specialPr
 const StockLog = require('../../models/productCatalog/stockLogModel');
 const Variant = require('../../models/productCatalog/productVariantModel');
 const FlashSale = require('../../models/offersAndDiscounts/flashSaleModel');
+const ShippingRule = require('../../models/shipping/shippingRuleModel');
 const {deleteUploadedImage} = require('../../utils/upload');
 const {startSession} = require("mongoose");
+const {Logform} = require("winston");
 
 
 function slugify(text) {
@@ -51,7 +53,8 @@ exports.createProduct = async (req, res) => {
             compareAtPrice,
             barcode,
             // Variant data (for variant products)
-            variants = []
+            variants = [],
+            shipping
         } = req.body;
 
         // Parse category IDs
@@ -82,6 +85,17 @@ exports.createProduct = async (req, res) => {
             }
         }
 
+        // Parse shipping data if provided
+        let parsedShipping = null;
+        if (shipping) {
+            try {
+                parsedShipping = typeof shipping === 'string' ? JSON.parse(shipping) : shipping;
+            } catch (err) {
+                console.error("Error parsing shipping data:", err);
+                parsedShipping = null;
+            }
+        }
+
         // Parse variants if it's a string (from FormData)
         let parsedVariants = [];
         if (type === 'variant') {
@@ -105,7 +119,7 @@ exports.createProduct = async (req, res) => {
         const productSlug = slug || slugify(title);
 
         // Check for duplicate slug
-        const existingSlug = await Product.findOne({ slug: productSlug });
+        const existingSlug = await Product.findOne({slug: productSlug});
         if (existingSlug) {
             await cleanupUploadedImages(req);
             return res.status(400).json({
@@ -116,7 +130,7 @@ exports.createProduct = async (req, res) => {
 
         // Check for duplicate SKU
         if (sku) {
-            const existingSku = await Product.findOne({ sku });
+            const existingSku = await Product.findOne({sku});
             if (existingSku) {
                 await cleanupUploadedImages(req);
                 return res.status(400).json({
@@ -141,7 +155,7 @@ exports.createProduct = async (req, res) => {
         // Validate categories
         if (parsedCategoryIds.length > 0) {
             const validCategories = await Category.countDocuments({
-                _id: { $in: parsedCategoryIds }
+                _id: {$in: parsedCategoryIds}
             });
             if (validCategories !== parsedCategoryIds.length) {
                 await cleanupUploadedImages(req);
@@ -153,12 +167,13 @@ exports.createProduct = async (req, res) => {
         }
 
         // Handle image paths
-        const thumbnailPath = req.processedImage?.original || null;
-        const galleryImages = req.processedImages?.map(img => img.original) || [];
+        const thumbnailPath = req.productThumbnail?.path || null;
+        const galleryImages = req.productImages?.map(file => file.path) || [];
 
         // Parse boolean values
         const productStatus = status === "true" || status === true;
         const productIsFeatured = isFeatured === "true" || isFeatured === true;
+
 
         // Create main product
         const newProduct = await Product.create({
@@ -174,6 +189,7 @@ exports.createProduct = async (req, res) => {
             status: productStatus,
             isFeatured: productIsFeatured,
             tags: parsedTags,
+            shipping: parsedShipping
         });
 
         // Handle product creation based on type
@@ -215,9 +231,10 @@ exports.createProduct = async (req, res) => {
         });
     }
 };
+
 // Helper function for simple product creation
 async function handleSimpleProductCreation(product, pricingData) {
-    const { basePrice, discountType, discountValue, currency, stock, compareAtPrice, barcode, attributes } = pricingData;
+    const {basePrice, discountType, discountValue, currency, stock, compareAtPrice, barcode, attributes} = pricingData;
 
     // Validate required pricing data for simple products
     if (!basePrice && basePrice !== 0) {
@@ -269,7 +286,7 @@ async function handleVariantProductCreation(product, variants) {
 
     // Check for existing SKUs in database
     const existingVariants = await ProductVariant.find({
-        sku: { $in: variantSkus }
+        sku: {$in: variantSkus}
     });
 
     if (existingVariants.length > 0) {
@@ -281,7 +298,18 @@ async function handleVariantProductCreation(product, variants) {
         // console.log("Processing variant:", variantData.sku);
         // console.log("Variant attributes:", variantData.attributes, "Type:", typeof variantData.attributes);
 
-        let { sku, attributes, price, compareAtPrice, stock, barcode, basePrice, discountType, discountValue = 0, currency = 'INR' } = variantData;
+        let {
+            sku,
+            attributes,
+            price,
+            compareAtPrice,
+            stock,
+            barcode,
+            basePrice,
+            discountType,
+            discountValue = 0,
+            currency = 'INR'
+        } = variantData;
 
         if (!sku || (price === undefined && basePrice === undefined)) {
             throw new Error('SKU and price are required for each variant');
@@ -437,33 +465,38 @@ exports.listProducts = async (req, res) => {
             limit = 20,
             search,
             brandId,
-            categoryId,
+            category,
             status,
             isFeatured,
             type,
             sort = '-createdAt',
         } = req.query;
 
-        // Build query filters
         const query = {};
 
         if (typeof status !== 'undefined') query.status = status === 'true';
         if (typeof isFeatured !== 'undefined') query.isFeatured = isFeatured === 'true';
         if (brandId) query.brandId = brandId;
-        if (categoryId) query.categoryIds = categoryId;
         if (type) query.type = type;
 
-        // Handle text search
+        // Category filter
+        if (category) {
+            const categories = Array.isArray(category)
+                ? category
+                : category.split(',').map(c => c.trim());
+            query.categoryIds = { $in: categories };
+        }
+
+        // Search filter
         if (search) {
             query.$or = [
-                {title: {$regex: search, $options: 'i'}},
-                {description: {$regex: search, $options: 'i'}},
+                { title: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } },
             ];
         }
 
         const skip = (Number(page) - 1) * Number(limit);
 
-        // Fetch products
         const products = await Product.find(query)
             .populate('brandId', 'name slug')
             .populate('categoryIds', 'name slug')
@@ -472,53 +505,73 @@ exports.listProducts = async (req, res) => {
             .limit(Number(limit))
             .lean();
 
-        // Get total count
         const total = await Product.countDocuments(query);
 
-        // Fetch related pricing and variants in parallel
+        // Collect all productIds
         const productIds = products.map(p => p._id);
 
-        const [pricingList, variantsList] = await Promise.all([
-            ProductPricing.find({productId: {$in: productIds}, status: true})
+        // Fetch pricing + variants in parallel
+        const [pricingList, variantList] = await Promise.all([
+            ProductPricing.find({
+                productId: { $in: productIds },
+                status: true,
+            })
                 .select('productId variantId basePrice finalPrice discountType discountValue')
                 .lean(),
-            Variant.find({productId: {$in: productIds}})
+
+            Variant.find({
+                productId: { $in: productIds },
+            })
                 .select('productId name sku attributes stock status')
-                .lean(),
+                .lean()
         ]);
 
-        // Map and merge pricing + variants with products
-        const items = products.map(product => {
-            const productVariants = variantsList.filter(v => v.productId.toString() === product._id.toString());
-            const productPricing = pricingList.filter(p => p.productId.toString() === product._id.toString());
+        // Build pricing map for faster lookup
+        const pricingMap = {};
+        pricingList.forEach(p => {
+            const key = `${p.productId}-${p.variantId || 'main'}`;
+            pricingMap[key] = p;
+        });
 
-            // Find default or base pricing (variantId = null)
-            const basePrice = productPricing.find(p => !p.variantId);
-            const finalPrice = basePrice ? basePrice.finalPrice : null;
+        const formatDiscount = (pricing) => {
+            if (!pricing) return { type: null, value: 0 };
+            return {
+                type: pricing.discountType || null,
+                value: pricing.discountValue || 0,
+            };
+        };
+
+        // Final data formatting
+        const items = products.map(product => {
+            const pid = product._id.toString();
+
+            // Product-level pricing (variantId = null)
+            const mainPricing = pricingMap[`${pid}-main`] || null;
+
+            // Variants for this product
+            const variants = variantList
+                .filter(v => v.productId.toString() === pid)
+                .map(v => {
+                    const key = `${pid}-${v._id.toString()}`;
+                    const variantPricing = pricingMap[key];
+
+                    return {
+                        ...v,
+                        basePrice: variantPricing?.basePrice ?? mainPricing?.basePrice ?? null,
+                        finalPrice: variantPricing?.finalPrice ?? mainPricing?.finalPrice ?? null,
+                        discount: formatDiscount(variantPricing || mainPricing),
+                    };
+                });
 
             return {
                 ...product,
-                basePrice: basePrice ? basePrice.basePrice : null,
-                finalPrice: finalPrice,
-                discount: basePrice
-                    ? {
-                        type: basePrice.discountType || null,
-                        value: basePrice.discountValue || 0,
-                    }
-                    : null,
-                variants: productVariants.map(v => {
-                    const variantPrice = productPricing.find(p => p.variantId?.toString() === v._id.toString());
-                    return {
-                        ...v,
-                        basePrice: variantPrice ? variantPrice.price : basePrice?.basePrice || null,
-                        finalPrice: variantPrice ? variantPrice.finalPrice : basePrice?.finalPrice || null,
-                    };
-                }),
+                basePrice: mainPricing?.basePrice || null,
+                finalPrice: mainPricing?.finalPrice || null,
+                discount: formatDiscount(mainPricing),
+                variants,
             };
         });
 
-        // console.log(items)
-        // Response
         return res.status(200).json({
             success: true,
             data: {
@@ -529,9 +582,10 @@ exports.listProducts = async (req, res) => {
                 totalPages: Math.ceil(total / Number(limit)),
             },
         });
+
     } catch (err) {
         console.error('Error listing products:', err);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: 'Error fetching products',
             error: err.message,
@@ -539,11 +593,10 @@ exports.listProducts = async (req, res) => {
     }
 };
 
-
 exports.updateProduct = async (req, res) => {
     try {
         const {id} = req.params;
-        // console.log("Updating product - req.body:", req.body);
+        console.log("Updating product - req.body:", req.body);
 
         // Check if product exists
         const existingProduct = await Product.findById(id);
@@ -571,6 +624,7 @@ exports.updateProduct = async (req, res) => {
             status = true,
             isFeatured = false,
             tags = [],
+            shipping
         } = req.body;
 
         // -------- Parse arrays safely --------
@@ -681,25 +735,34 @@ exports.updateProduct = async (req, res) => {
             }
         }
 
-        // -------- Handle images --------
-        const thumbnailPath = req.processedImage?.original || existingProduct.thumbnail;
-        const galleryImages =
-            req.processedImages?.map((img) => img.original) || existingProduct.images || [];
+        const thumbnailPath = req.productThumbnail?.path || existingProduct.thumbnail;
 
-        // Delete old images only if replaced
-        if (req.processedImage?.original && existingProduct.thumbnail) {
+        const galleryImages =
+            req.productImages?.map((file) => file.path) || existingProduct.images || [];
+
+        if (req.productThumbnail?.path && existingProduct.thumbnail) {
             const oldFilename = existingProduct.thumbnail.split("/").pop();
             await deleteUploadedImage("products", oldFilename);
         }
 
-        if (req.processedImages?.length && existingProduct.images?.length) {
+        if (req.productImages?.length && existingProduct.images?.length) {
             for (const oldImage of existingProduct.images) {
                 const oldFilename = oldImage.split("/").pop();
                 await deleteUploadedImage("products", oldFilename);
             }
         }
 
-        // -------- Prepare update object --------
+        // Parse shipping data if provided
+        let parsedShipping = null;
+        if (shipping) {
+            try {
+                parsedShipping = typeof shipping === 'string' ? JSON.parse(shipping) : shipping;
+            } catch (err) {
+                console.error("Error parsing shipping data:", err);
+                parsedShipping = null;
+            }
+        }
+
         const updateData = {
             title: title?.trim() || existingProduct.title,
             slug: productSlug,
@@ -713,6 +776,7 @@ exports.updateProduct = async (req, res) => {
             status: productStatus,
             isFeatured: productIsFeatured,
             tags: parsedTags,
+            shipping: parsedShipping
         };
 
         // -------- Update product --------
