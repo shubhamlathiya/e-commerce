@@ -33,7 +33,7 @@ const addressRoutes = require('././shipping/addressRoutes')
 const paymentRoutes = require('././payments/paymentRoutes');
 const orderRoutes = require('././orders/orderRoutes');
 const walletRoutes = require('././payments/walletRoutes');
-
+const transactionRoutes = require("././payments/transactionRoutes");
 const marketingRoutes = require('././marketing/marketingRoutes');
 const analyticsRoutes = require('././analytics/analyticsRoutes');
 const settingsRoutes = require('././settings/settingsRoutes');
@@ -79,6 +79,7 @@ router.use('/api/payments', paymentRoutes);
 router.use('/api/orders', orderRoutes);
 router.use('/api/order', orderRoutes);
 router.use('/api/wallet', walletRoutes);
+router.use('/api/transactions', transactionRoutes);
 
 router.use('/api/marketing', marketingRoutes);
 router.use('/api/analytics', analyticsRoutes);
