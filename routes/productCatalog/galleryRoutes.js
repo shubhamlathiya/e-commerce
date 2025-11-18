@@ -4,7 +4,7 @@ const {body, param} = require('express-validator');
 const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
 const productGalleryController = require('../../controllers/productCatalog/productGalleryController');
 const validate = require('../../utils/productCatalog/validate');
-const {multipleImageUpload} = require("../../utils/upload");
+const {combinedImageUpload} = require("../../utils/upload");
 
 /**
  * @swagger
@@ -82,7 +82,7 @@ router.post(
     '/:productId',
     authenticateJWT,
     isAdmin,
-    multipleImageUpload('images', 'products', 10),
+    combinedImageUpload("products"),
     [
         param('productId').isMongoId(),
         body('altTexts').optional().isArray(),
@@ -136,7 +136,7 @@ router.put(
     '/:productId',
     authenticateJWT,
     isAdmin,
-    multipleImageUpload('images', 'products', 10),
+    combinedImageUpload("products"),
     [
         param('productId').isMongoId()
     ],
