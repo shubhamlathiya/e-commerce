@@ -1,16 +1,15 @@
 const express = require('express');
-const router = express.Router();
 const {check} = require('express-validator');
 const paymentController = require('../../controllers/payments/paymentController');
 const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
 
+const router = express.Router();
 /**
  * @swagger
  * tags:
  *   name: Payments
  *   description: Payment processing, methods, and transactions
  */
-
 
 /**
  * @swagger
@@ -41,9 +40,9 @@ const {authenticateJWT, isAdmin} = require('../../middleware/authMiddleware');
  *       400:
  *         description: Invalid callback payload
  */
-router.post('/callback/:gateway',
-    paymentController.processCallback
-);
+// router.post('/callback/:gateway',
+//     paymentController.processCallback
+// );
 
 /**
  * @swagger
@@ -80,12 +79,12 @@ router.post('/callback/:gateway',
  *       500:
  *         description: Server error
  */
-router.get('/methods',
-    [
-        check('status').optional().isBoolean()
-    ],
-    paymentController.getAllMethods
-);
+// router.get('/methods',
+//     [
+//         check('status').optional().isBoolean()
+//     ],
+//     paymentController.getAllMethods
+// );
 
 /**
  * @swagger
@@ -128,6 +127,30 @@ router.post('/initiate',
     paymentController.initiatePayment
 );
 
+// router.post('/razorpay/order',
+//     [
+//         check('amount').optional().isNumeric(),
+//         check('currency').optional().isString(),
+//         check('orderId').optional().isMongoId(),
+//         check('userId').optional().isMongoId()
+//     ],
+//     paymentController.createRazorpayOrder
+// );
+
+router.post('/razorpay/verify',
+    [
+        check('razorpay_order_id').isString(),
+        check('razorpay_payment_id').isString(),
+        check('razorpay_signature').isString()
+    ],
+    paymentController.verifyRazorpayPayment
+);
+
+router.post('/razorpay/webhook',
+    express.raw({ type: 'application/json' }),
+    paymentController.razorpayWebhook
+);
+
 /**
  * @swagger
  * /api/payments/transactions/{orderId}:
@@ -149,10 +172,10 @@ router.post('/initiate',
  *       404:
  *         description: No transactions found
  */
-router.get('/transactions/:orderId',
-    authenticateJWT,
-    paymentController.getTransactionsByOrder
-);
+// router.get('/transactions/:orderId',
+//     authenticateJWT,
+//     paymentController.getTransactionsByOrder
+// );
 
 /**
  * @swagger
@@ -177,11 +200,11 @@ router.get('/transactions/:orderId',
  *       404:
  *         description: Method not found
  */
-router.get('/methods/:id',
-    authenticateJWT,
-    isAdmin,
-    paymentController.getMethodById
-);
+// router.get('/methods/:id',
+//     authenticateJWT,
+//     isAdmin,
+//     paymentController.getMethodById
+// );
 
 /**
  * @swagger
@@ -221,17 +244,17 @@ router.get('/methods/:id',
  *       400:
  *         description: Validation error
  */
-router.post('/methods',
-    authenticateJWT,
-    isAdmin,
-    [
-        check('name').isString().withMessage('Name is required'),
-        check('type').isString().withMessage('Type is required'),
-        check('status').optional().isBoolean(),
-        check('config').optional().isObject()
-    ],
-    paymentController.createMethod
-);
+// router.post('/methods',
+//     authenticateJWT,
+//     isAdmin,
+//     [
+//         check('name').isString().withMessage('Name is required'),
+//         check('type').isString().withMessage('Type is required'),
+//         check('status').optional().isBoolean(),
+//         check('config').optional().isObject()
+//     ],
+//     paymentController.createMethod
+// );
 
 /**
  * @swagger
@@ -268,17 +291,17 @@ router.post('/methods',
  *       404:
  *         description: Payment method not found
  */
-router.put('/methods/:id',
-    authenticateJWT,
-    isAdmin,
-    [
-        check('name').optional().isString(),
-        check('type').optional().isString(),
-        check('status').optional().isBoolean(),
-        check('config').optional().isObject()
-    ],
-    paymentController.updateMethod
-);
+// router.put('/methods/:id',
+//     authenticateJWT,
+//     isAdmin,
+//     [
+//         check('name').optional().isString(),
+//         check('type').optional().isString(),
+//         check('status').optional().isBoolean(),
+//         check('config').optional().isObject()
+//     ],
+//     paymentController.updateMethod
+// );
 
 /**
  * @swagger
@@ -300,11 +323,11 @@ router.put('/methods/:id',
  *       404:
  *         description: Method not found
  */
-router.delete('/methods/:id',
-    authenticateJWT,
-    isAdmin,
-    paymentController.deleteMethod
-);
+// router.delete('/methods/:id',
+//     authenticateJWT,
+//     isAdmin,
+//     paymentController.deleteMethod
+// );
 
 /**
  * @swagger
@@ -338,15 +361,15 @@ router.delete('/methods/:id',
  *       400:
  *         description: Invalid refund request
  */
-router.post('/refund',
-    authenticateJWT,
-    isAdmin,
-    [
-        check('transactionId').isString().withMessage('Transaction ID is required'),
-        check('amount').optional().isNumeric(),
-        check('reason').optional().isString()
-    ],
-    paymentController.processRefund
-);
+// router.post('/refund',
+//     authenticateJWT,
+//     isAdmin,
+//     [
+//         check('transactionId').isString().withMessage('Transaction ID is required'),
+//         check('amount').optional().isNumeric(),
+//         check('reason').optional().isString()
+//     ],
+//     paymentController.processRefund
+// );
 
 module.exports = router;

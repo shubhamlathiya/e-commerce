@@ -94,7 +94,7 @@ exports.getCart = async (req, res) => {
                     product?.price ??
                     item.finalPrice;
 
-                const subtotal = price * item.quantity;
+                const subtotal = item.finalPrice * item.quantity;
 
                 // Shipping charged once per product
                 const shippingCharge =
@@ -132,7 +132,7 @@ exports.getCart = async (req, res) => {
             subtotal + shippingTotal + marketFeesValue - discount,
             0
         );
-
+        console.log(subtotal)
         // -------------------------------------------------------
         //  RESPONSE
         // -------------------------------------------------------

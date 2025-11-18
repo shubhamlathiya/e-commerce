@@ -13,6 +13,7 @@ const Variant = require('../../models/productCatalog/productVariantModel');
 const nodemailer = require('nodemailer');
 const { createNotification } = require('../notifications/notificationController');
 const { calculateShipping } = require('../../utils/shipping/calculateShipping');
+const ShippingZone = require("../../models/shipping/shippingZoneModel");
 
 /**
  * Create a new order from cart
@@ -20,50 +21,77 @@ const { calculateShipping } = require('../../utils/shipping/calculateShipping');
 exports.createOrder = async (req, res) => {
     try {
         const userId = req.user?.id;
+
         const {
-            cartId, paymentMethod, shippingAddress, addressId, billingAddress = null, notes = '', summaryId
+            cartId,
+            paymentMethod,
+            shippingAddress,
+            addressId,
+            billingAddress = null,
+            notes = "",
+            summaryId
         } = req.body;
 
-        // Find the cart
-        const cart = await Cart.findOne({_id: cartId, $or: [{userId}, {userId: null}]});
+        if (!cartId) {
+            return res.status(400).json({
+                success: false,
+                message: "cartId is required"
+            });
+        }
+
+        // -----------------------------
+        // LOAD CART
+        // -----------------------------
+        const cart = await Cart.findOne({
+            _id: cartId,
+            $or: [{ userId }, { userId: null }]
+        });
+
         if (!cart) {
             return res.status(404).json({
-                success: false, message: 'Cart not found'
+                success: false,
+                message: "Cart not found"
             });
         }
 
-        // Get order summary (prefer summaryId if provided)
-        let orderSummary = null;
+        // -----------------------------
+        // LOAD ORDER SUMMARY
+        // -----------------------------
+        let summary = null;
+
         if (summaryId) {
-            orderSummary = await OrderSummary.findById(summaryId);
+            summary = await OrderSummary.findById(summaryId).lean();
         }
-        if (!orderSummary) {
-            orderSummary = await OrderSummary.findOne({cartId});
+
+        if (!summary) {
+            summary = await OrderSummary.findOne({ cartId }).lean();
         }
-        if (!orderSummary) {
+        console.log(summary)
+        if (!summary) {
             return res.status(404).json({
-                success: false, message: 'Order summary not found. Please generate summary first.'
+                success: false,
+                message: "Order summary not found. Please generate summary first."
             });
         }
 
-        // Validate summary freshness (15 minutes)
-        const maxAgeMs = 15 * 60 * 1000;
-        const age = Date.now() - new Date(orderSummary.createdAt).getTime();
-        if (age > maxAgeMs) {
-            return res.status(400).json({
-                success: false, message: 'Order summary expired. Please regenerate.'
-            });
-        }
-
-        // Resolve shipping address if addressId provided
+        // -----------------------------
+        // RESOLVE SHIPPING ADDRESS
+        // -----------------------------
         let finalShippingAddress = shippingAddress;
+
         if (!finalShippingAddress && addressId && userId) {
-            const addr = await UserAddress.findOne({_id: addressId, userId}).lean();
+            const addr = await UserAddress.findOne({
+                _id: addressId,
+                userId
+            }).lean();
+
             if (!addr) {
                 return res.status(404).json({
-                    success: false, message: 'Address not found'
+                    success: false,
+                    message: "Address not found"
                 });
             }
+
             finalShippingAddress = {
                 name: addr.name,
                 phone: addr.phone,
@@ -71,74 +99,121 @@ exports.createOrder = async (req, res) => {
                 city: addr.city,
                 state: addr.state,
                 country: addr.country,
-                pincode: addr.pincode,
+                pincode: addr.pincode
             };
         }
 
-        // Recalculate shipping server-side to avoid tampering
-        const calcShip = await calculateShipping(cart, finalShippingAddress);
-        const shippingCost = calcShip.shippingTotal;
+        if (!finalShippingAddress) {
+            return res.status(400).json({
+                success: false,
+                message: "Shipping address is required"
+            });
+        }
 
-        // Create new order - will auto-generate orderNumber in pre-save hook
+        // -----------------------------
+        // RECALCULATE SHIPPING SERVER SIDE
+        // -----------------------------
+
+        const serverShipping = summary.shipping;
+
+        // -----------------------------
+        // BUILD ORDER ITEMS FROM SUMMARY
+        // -----------------------------
+        const orderItems = summary.items.map(it => ({
+            productId: it.productId,
+            variantId: it.variantId,
+            name: it.name,
+            brand: it.brand,
+            brandLogo: it.brandLogo,
+            image: it.image,
+            sku: it.sku,
+            quantity: it.quantity,
+            unitPrice: it.unitPrice,
+            finalPrice: it.finalPrice,
+            variantAttributes: it.variantAttributes,
+            shippingCharge: it.shippingCharge
+        }));
+
+        // -----------------------------
+        // CREATE ORDER
+        // -----------------------------
         const order = new Order({
             userId: userId || null,
-            items: cart.items.map(item => ({
-                productId: item.productId,
-                variantId: item.variantId,
-                name: item.name || `Product ${item.productId}`,
-                quantity: item.quantity,
-                price: item.price,
-                total: item.finalPrice * item.quantity
-            })),
+            items: orderItems,
             paymentMethod,
-            paymentStatus: paymentMethod.toLowerCase() === 'cod' ? 'cod' : 'pending',
+            paymentStatus: paymentMethod.toLowerCase() === "cod" ? "cod" : "pending",
             shippingAddress: finalShippingAddress,
             billingAddress: billingAddress || finalShippingAddress,
+
             totals: {
-                subtotal: orderSummary.subtotal,
-                discount: orderSummary.discount,
-                shipping: shippingCost,
-                tax: orderSummary.tax,
-                grandTotal: Number((orderSummary.subtotal + shippingCost + orderSummary.tax - orderSummary.discount).toFixed(2))
+                subtotal: summary.subtotal,
+                discount: summary.discount,
+                tax: summary.tax,
+                shipping: serverShipping,       // override
+                grandTotal: summary.total
             },
-            status: 'placed',
-            couponCode: cart.couponCode,
-            notes
+
+            couponCode: cart.couponCode || null,
+            notes,
+            status: "placed"
         });
 
         await order.save();
 
-        // Create order history entry
-        const orderHistory = new OrderHistory({
-            orderId: order._id, status: 'placed', comment: 'Order placed successfully', updatedBy: userId || 'system'
+        // -----------------------------
+        // ORDER HISTORY
+        // -----------------------------
+        await OrderHistory.create({
+            orderId: order._id,
+            status: "placed",
+            comment: "Order placed successfully",
+            updatedBy: userId || "system"
         });
 
-        await orderHistory.save();
-
-        // Create notification log
+        // -----------------------------
+        // CREATE NOTIFICATION
+        // -----------------------------
         if (userId) {
-            await createNotification(userId, 'email', 'order_confirmation', order._id, 'sent');
+            await createNotification(
+                userId,
+                "email",
+                "order_confirmation",
+                order._id,
+                "sent"
+            );
         }
 
-        // Clear the cart
+        // -----------------------------
+        // CLEAR CART
+        // -----------------------------
         cart.items = [];
         cart.couponCode = null;
         cart.discount = 0;
         cart.cartTotal = 0;
         await cart.save();
 
+        // -----------------------------
+        // RESPONSE
+        // -----------------------------
         return res.status(201).json({
-            success: true, message: 'Order created successfully', data: {
-                orderId: order._id, orderNumber: order.orderNumber
+            success: true,
+            message: "Order created successfully",
+            data: {
+                orderId: order._id,
+                orderNumber: order.orderNumber
             }
         });
+
     } catch (error) {
-        console.error('Create order error:', error);
+        console.error("Create order error:", error);
         return res.status(500).json({
-            success: false, message: 'Error creating order', error: error.message
+            success: false,
+            message: "Error creating order",
+            error: error.message
         });
     }
 };
+
 /**
  * Get order by ID
  */
@@ -341,213 +416,177 @@ exports.getUserOrders = async (req, res) => {
     try {
         const userId = req.user?.id;
         const {status, page = 1, limit = 10} = req.query;
-
         const skip = (page - 1) * limit;
 
         // Build query
-        let query = {userId};
-        if (status) {
-            query.status = status;
-        }
+        const query = {userId};
+        if (status) query.status = status;
 
-        // Fetch orders with full population
+        // Fetch orders with deep population (same as getAllOrders)
         const orders = await Order.find(query)
             .populate({
                 path: 'items.productId',
-                select: 'title images price mrp discount finalPrice brandId categoryIds description sku',
-                populate: {
-                    path: 'brandId', select: 'name logo'
-                }
+                model: 'Product',
+                select: 'title slug description sku thumbnail images brandId categoryIds type status isFeatured',
+                populate: [
+                    {path: 'brandId', model: 'Brand', select: 'name logo'},
+                    {path: 'categoryIds', model: 'Category', select: 'name slug'},
+                    {path: 'gallery', model: 'ProductGallery', select: 'images videos'}
+                ]
             })
             .populate({
-                path: 'items.variantId', select: 'attributes price stock sku images'
+                path: 'items.variantId',
+                model: 'ProductVariant',
+                select: 'attributes price stock sku images'
+            })
+            .populate({
+                path: 'userId',
+                model: 'User',
+                select: 'name email phone'
             })
             .sort({placedAt: -1})
             .skip(skip)
             .limit(parseInt(limit))
             .lean();
 
-        // Transform orders to match your data structure
+        // Transform orders (same structure as getAllOrders)
         const transformedOrders = orders.map(order => {
-            // Transform items with full product details
             const items = order.items.map(item => {
-                const product = item.productId;
-                const variant = item.variantId;
+                const product = item.productId || {};
+                const variant = item.variantId || {};
 
-                // Get product name
-                const productName = product?.title || product?.name || item.name || `Product ${item.productId}`;
+                const productImage = variant?.images?.[0] || product?.images?.[0] || product?.thumbnail || null;
 
-                // Get product image
-                let productImage = null;
-                if (variant?.images && variant.images.length > 0) {
-                    productImage = variant.images[0];
-                } else if (product?.images && product.images.length > 0) {
-                    productImage = product.images[0];
-                }
-
-                // Get variant attributes
-                const variantAttributes = variant?.attributes || [];
-                const variantDescription = variantAttributes.map(attr => `${attr.name || attr.attribute}: ${attr.value}`).join(', ');
+                const variantAttributes = (variant?.attributes || [])
+                    .map(attr => `${attr.name || attr.attribute}: ${attr.value}`)
+                    .join(', ');
 
                 return {
-                    productId: item.productId?._id || item.productId,
-                    variantId: item.variantId?._id || item.variantId,
-                    name: productName,
+                    productId: product?._id,
+                    variantId: variant?._id,
+                    name: product?.title || 'Unnamed Product',
                     brand: product?.brandId?.name || null,
                     brandLogo: product?.brandId?.logo || null,
                     image: productImage,
-                    variantAttributes: variantDescription,
                     sku: variant?.sku || product?.sku,
+                    variantAttributes,
                     quantity: item.quantity || 1,
-                    unitPrice: item.price || item.unitPrice || 0,
-                    finalPrice: item.total || item.finalPrice || (item.price * item.quantity) || 0,
-                    productDetails: {
-                        title: product?.title,
-                        description: product?.description,
-                        categoryIds: product?.categoryIds,
-                        originalPrice: product?.mrp || product?.price,
-                        discount: product?.discount,
-                        stock: product?.stock
-                    }
+                    unitPrice: item.price || variant?.price || product?.finalPrice || 0,
+                    finalPrice: item.total || item.finalPrice || (item.price * (item.quantity || 1)) || 0,
+                    category: product?.categoryIds?.map(cat => cat.name).join(', ') || null,
+                    description: product?.description || ''
                 };
             });
 
-            // Calculate total items count
-            const totalItems = order.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
-
-            // Use totals from your order structure
+            // Totals (same calculation as getAllOrders)
             const totals = order.totals || {};
             const subtotal = totals.subtotal || order.subtotal || 0;
-            const shippingCost = totals.shipping || order.shippingCost || 0;
+            const shipping = totals.shipping || order.shippingCost || 0;
             const tax = totals.tax || order.tax || 0;
             const discount = totals.discount || order.discount || 0;
             const grandTotal = totals.grandTotal || order.total || 0;
 
-            // Shipping address details
-            const shippingAddress = order.shippingAddress ? {
-                name: order.shippingAddress.name,
-                phone: order.shippingAddress.phone,
-                address: order.shippingAddress.address,
-                city: order.shippingAddress.city,
-                state: order.shippingAddress.state,
-                country: order.shippingAddress.country,
-                pincode: order.shippingAddress.pincode,
-                landmark: order.shippingAddress.landmark,
-                addressType: order.shippingAddress.type || order.shippingAddress.addressType,
-                isDefault: order.shippingAddress.isDefault
+            // Helper for address (same as getAllOrders)
+            const formatAddress = (addr) => addr ? {
+                name: addr.name,
+                phone: addr.phone,
+                address: addr.address,
+                city: addr.city,
+                state: addr.state,
+                country: addr.country,
+                pincode: addr.pincode,
+                landmark: addr.landmark,
+                addressType: addr.type || addr.addressType,
+                isDefault: addr.isDefault
             } : null;
 
-            // Billing address details
-            const billingAddress = order.billingAddress ? {
-                name: order.billingAddress.name,
-                phone: order.billingAddress.phone,
-                address: order.billingAddress.address,
-                city: order.billingAddress.city,
-                state: order.billingAddress.state,
-                country: order.billingAddress.country,
-                pincode: order.billingAddress.pincode,
-                landmark: order.billingAddress.landmark,
-                addressType: order.billingAddress.type || order.billingAddress.addressType,
-                isDefault: order.billingAddress.isDefault
-            } : null;
-
-            // Payment details
-            const paymentDetails = {
-                method: order.paymentMethod,
-                status: order.paymentStatus,
-                transactionId: order.transactionId,
-                paidAmount: grandTotal, // Use grandTotal as paid amount
-                paymentDate: order.paymentDate || order.placedAt
+            // Build timeline (same logic as getAllOrders)
+            const timeline = [];
+            const statusSteps = ['placed', 'confirmed', 'shipped', 'delivered'];
+            const statusNames = {
+                placed: 'Order Placed',
+                confirmed: 'Order Confirmed',
+                shipped: 'Shipped',
+                delivered: 'Delivered',
+                cancelled: 'Cancelled'
             };
 
-            // Order timeline based on status
-            const orderTimeline = [];
-            if (order.placedAt) {
-                orderTimeline.push({
-                    event: 'Order Placed', date: order.placedAt, completed: true
-                });
-            }
-
-            // Add status-specific events
-            if (order.status === 'confirmed' || order.status === 'processing') {
-                orderTimeline.push({
-                    event: 'Order Confirmed', date: order.confirmedAt || order.updatedAt, completed: true
-                });
-            }
-
-            if (order.status === 'shipped') {
-                orderTimeline.push({
-                    event: 'Shipped', date: order.shippedAt || order.updatedAt, completed: true
-                });
-            }
-
-            if (order.status === 'delivered') {
-                orderTimeline.push({
-                    event: 'Delivered', date: order.deliveredAt || order.updatedAt, completed: true
+            for (const step of statusSteps) {
+                timeline.push({
+                    event: statusNames[step],
+                    date: order[`${step}At`] || (order.status === step ? order.updatedAt : null),
+                    completed: statusSteps.indexOf(order.status) >= statusSteps.indexOf(step)
                 });
             }
 
             if (order.status === 'cancelled') {
-                orderTimeline.push({
-                    event: 'Cancelled', date: order.cancelledAt || order.updatedAt, completed: true
+                timeline.push({
+                    event: 'Cancelled',
+                    date: order.cancelledAt || order.updatedAt,
+                    completed: true
                 });
             }
 
-            // Add pending events based on current status
-            if (['placed', 'confirmed', 'processing'].includes(order.status)) {
-                orderTimeline.push({
-                    event: 'Shipped', date: null, completed: false
-                });
-            }
-
-            if (['placed', 'confirmed', 'processing', 'shipped'].includes(order.status)) {
-                orderTimeline.push({
-                    event: 'Delivered', date: null, completed: false
-                });
-            }
-
-            // Price breakdown using your totals structure
-            const priceBreakdown = {
-                itemsTotal: subtotal,
-                shipping: shippingCost,
-                tax: tax,
-                discount: discount,
-                couponDiscount: order.couponDiscount || 0,
-                grandTotal: grandTotal
-            };
-
+            // Return the exact same structure as getAllOrders
             return {
                 _id: order._id,
                 orderNumber: order.orderNumber,
+                user: {
+                    id: order.userId?._id,
+                    name: order.userId?.name,
+                    email: order.userId?.email,
+                    phone: order.userId?.phone
+                },
                 status: order.status,
-                items,
-                totalItems,
-                priceBreakdown,
-                coupon: order.couponCode ? {
-                    code: order.couponCode, name: order.couponCode, discountValue: discount
-                } : null,
-                shippingAddress,
-                billingAddress,
-                payment: paymentDetails,
-                timeline: orderTimeline,
                 placedAt: order.placedAt,
                 expectedDelivery: order.expectedDelivery,
                 trackingNumber: order.trackingNumber,
                 notes: order.notes,
-                cancellationReason: order.cancellationReason, // Summary for quick display
+                cancellationReason: order.cancellationReason,
+                items,
+                totals: {
+                    subtotal,
+                    shipping,
+                    tax,
+                    discount,
+                    grandTotal
+                },
+                coupon: order.couponCode ? {
+                    code: order.couponCode,
+                    discountValue: order.couponDiscount || discount
+                } : null,
+                shippingAddress: formatAddress(order.shippingAddress),
+                billingAddress: formatAddress(order.billingAddress),
+                payment: {
+                    method: order.paymentMethod,
+                    status: order.paymentStatus,
+                    transactionId: order.transactionId,
+                    amount: grandTotal,
+                    date: order.paymentDate || order.placedAt
+                },
+                timeline,
+                // Additional fields that might be useful for frontend
+                totalItems: order.items.reduce((sum, item) => sum + (item.quantity || 1), 0),
                 summary: {
-                    totalItems,
                     itemsCount: order.items.length,
+                    totalItems: order.items.reduce((sum, item) => sum + (item.quantity || 1), 0),
                     totalAmount: `$${grandTotal.toFixed(2)}`,
                     status: order.status,
                     orderDate: order.placedAt ? new Date(order.placedAt).toLocaleDateString() : 'N/A'
-                }, // Original totals for reference
-                originalTotals: totals
+                },
+                priceBreakdown: {
+                    itemsTotal: subtotal,
+                    shipping: shipping,
+                    tax: tax,
+                    discount: discount,
+                    couponDiscount: order.couponDiscount || 0,
+                    grandTotal: grandTotal
+                }
             };
         });
 
         const total = await Order.countDocuments(query);
-        // console.log(transformedOrders)
+        console.log(transformedOrders[0])
         return res.status(200).json({
             success: true,
             count: transformedOrders.length,
@@ -559,7 +598,9 @@ exports.getUserOrders = async (req, res) => {
     } catch (error) {
         console.error('Get user orders error:', error);
         return res.status(500).json({
-            success: false, message: 'Error retrieving orders', error: error.message
+            success: false,
+            message: 'Error retrieving orders',
+            error: error.message
         });
     }
 };
@@ -709,7 +750,6 @@ exports.getAllOrders = async (req, res) => {
         });
 
         const total = await Order.countDocuments(query);
-
         return res.status(200).json({
             success: true,
             count: transformedOrders.length,
@@ -788,189 +828,203 @@ exports.updateOrderStatus = async (req, res) => {
  */
 exports.generateOrderSummary = async (req, res) => {
     try {
-        const userId = req.user?.id;
-        const {cartId, shippingAddress, addressId} = req.body;
-        console.log(req.body);
+        const userId = req.user ? req.user.id : null;
+        const { cartId, shippingAddress, addressId } = req.body;
 
-        // Build base query for cart
-        const cartQuery = {_id: cartId, $or: [{userId}, {userId: null}]};
-
-        // Try to populate with Variant model, if it exists
-        let cart;
-        try {
-            cart = await Cart.findOne(cartQuery)
-                .populate({
-                    path: 'items.productId',
-                    select: 'title images price mrp discount finalPrice brandId categoryIds description',
-                    populate: {
-                        path: 'brandId', select: 'name logo'
-                    }
-                })
-                .populate({
-                    path: 'items.variantId', select: 'attributes price stock sku images'
-                });
-        } catch (populateError) {
-            // If Variant population fails, try without variant population
-            console.log('Variant population failed, trying without variant population:', populateError.message);
-            cart = await Cart.findOne(cartQuery)
-                .populate({
-                    path: 'items.productId',
-                    select: 'title name images price mrp discount finalPrice brandId categoryIds description',
-                    populate: {
-                        path: 'brandId', select: 'name logo'
-                    }
-                });
+        if (!cartId) {
+            return res.status(400).json({
+                success: false,
+                message: "cartId is required"
+            });
         }
+
+        const cartQuery = userId
+            ? { _id: cartId, $or: [{ userId }, { userId: null }] }
+            : { _id: cartId, userId: null };
+
+        // -------------------------------------------------------
+        // LOAD CART
+        // -------------------------------------------------------
+        const cart = await Cart.findOne(cartQuery)
+            .populate({
+                path: "items.productId",
+                select: "title images price finalPrice brandId categoryIds description sku stock shipping",
+                populate: { path: "brandId", select: "name logo" }
+            })
+            .populate({
+                path: "items.variantId",
+                model: "ProductVariant",
+                select: "attributes price stock sku images"
+            })
+            .lean();
 
         if (!cart) {
-            return res.status(404).json({
-                success: false, message: 'Cart not found'
-            });
+            return res.status(404).json({ success: false, message: "Cart not found" });
         }
 
-        if (cart.items.length === 0) {
-            return res.status(400).json({
-                success: false, message: 'Cart is empty'
-            });
+        if (!cart.items.length) {
+            return res.status(400).json({ success: false, message: "Cart is empty" });
         }
 
-        // Calculate subtotal from cart items and prepare detailed items
-        let subtotal = 0;
-        const detailedItems = cart.items.map((item) => {
-            const product = item.productId;
+        // -------------------------------------------------------
+        // RESOLVE ADDRESS (same as getCart)
+        // -------------------------------------------------------
+        let resolvedAddress = shippingAddress;
 
-            // Handle case where variantId might not be populated
-            const variant = item.variantId;
+        if (!resolvedAddress && addressId && userId) {
+            const addr = await UserAddress.findOne({ _id: addressId, userId }).lean();
 
-            // Get product name
-            let productName = product?.title || product?.name || `Product ${item.productId}`;
-
-            // Get product image
-            let productImage = null;
-            if (variant?.images && variant.images.length > 0) {
-                productImage = variant.images[0];
-            } else if (product?.images && product.images.length > 0) {
-                productImage = product.images[0];
+            if (!addr) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Address not found"
+                });
             }
 
-            // Determine price - variant price takes precedence, then product price
-            const unitPrice = variant?.price || product?.finalPrice || product?.price || item.price || 0;
-            const finalPrice = unitPrice * item.quantity;
+            resolvedAddress = {
+                country: addr.country,
+                state: addr.state,
+                pincode: addr.pincode
+            };
+        }
 
-            // Add to subtotal
+        // -------------------------------------------------------
+        // MARKET FEES (same logic as getCart)
+        // -------------------------------------------------------
+        let marketFeesValue = 0;
+
+        if (resolvedAddress) {
+            const zone = await ShippingZone.findOne({
+                $or: [
+                    { pincodes: resolvedAddress.pincode },
+                    { states: resolvedAddress.state },
+                    { countries: resolvedAddress.country }
+                ]
+            }).lean();
+
+            if (zone) {
+                marketFeesValue = Number(zone.marketFees || 0);
+            }
+        }
+
+        // -------------------------------------------------------
+        // BUILD ORDER ITEMS
+        // -------------------------------------------------------
+        let subtotal = 0;
+        let shippingTotal = 0;
+
+        const items = cart.items.map((item) => {
+            const product = item.productId || {};
+            const variant = item.variantId || {};
+
+            const image = variant.images?.[0] || product.images?.[0] || null;
+
+            const unitPrice =
+                item.finalPrice ??
+                variant.price ??
+                product.finalPrice ??
+                product.price ??
+                0;
+
+            const finalPrice = unitPrice * item.quantity;
             subtotal += finalPrice;
 
-            // Get brand name if available
-            const brandName = product?.brandId?.name || null;
-            const brandLogo = product?.brandId?.logo || null;
+            const variantAttributes = (variant.attributes || [])
+                .map(a => `${a.name}: ${a.value}`)
+                .join(", ");
 
-            // Get variant attributes if available
-            const variantAttributes = variant?.attributes || [];
-            const variantDescription = variantAttributes.map(attr => `${attr.name || attr.attribute}: ${attr.value}`).join(', ');
+            const shippingCharge = Number(product?.shipping?.cost || 0);
+            shippingTotal += shippingCharge;
 
             return {
-                productId: item.productId?._id || item.productId,
-                variantId: item.variantId?._id || item.variantId || null,
-                name: productName,
-                brand: brandName,
-                brandLogo: brandLogo,
-                image: productImage,
-                variantAttributes: variantDescription,
-                sku: variant?.sku || product?.sku,
+                productId: product._id,
+                variantId: variant._id || null,
+                name: product.title || "Product",
+                brand: product.brandId?.name || null,
+                brandLogo: product.brandId?.logo || null,
+                image,
+                sku: variant.sku || product.sku,
                 quantity: item.quantity,
-                unitPrice: unitPrice,
-                finalPrice: finalPrice,
-                stock: variant?.stock || product?.stock,
+                unitPrice,
+                finalPrice,
+                variantAttributes,
+                shippingCharge,
+                stock: variant.stock || product.stock,
                 productDetails: {
-                    title: product?.title,
-                    description: product?.description,
-                    categoryIds: product?.categoryIds,
-                    originalPrice: product?.mrp || product?.price,
-                    discount: product?.discount
+                    title: product.title,
+                    description: product.description,
+                    categoryIds: product.categoryIds
                 }
             };
         });
 
-        // Resolve shipping address via addressId if provided
-        let resolvedShippingAddress = shippingAddress;
-        if (!resolvedShippingAddress && addressId && userId) {
-            const addr = await UserAddress.findOne({_id: addressId, userId}).lean();
-            if (!addr) {
-                return res.status(404).json({
-                    success: false, message: 'Address not found'
-                });
-            }
-            resolvedShippingAddress = {
-                name: addr.name,
-                phone: addr.phone,
-                addressLine1: addr.address,
-                city: addr.city,
-                state: addr.state,
-                country: addr.country,
-                pincode: addr.pincode,
-                landmark: addr.landmark,
-                addressType: addr.addressType
-            };
-        }
-
-        const shipCalc = await calculateShipping(cart, resolvedShippingAddress);
-        const shippingCost = shipCalc.shippingTotal;
-
-        // Calculate tax (example: 5% of subtotal)
+        // -------------------------------------------------------
+        // TOTAL CALCULATIONS
+        // -------------------------------------------------------
+        const discount = Number(cart.discount || 0);
         const taxRate = 0.05;
         const tax = subtotal * taxRate;
 
-        // Calculate total
-        const total = subtotal + shippingCost + tax - (cart.discount || 0);
+        const total = Math.max(subtotal + shippingTotal + marketFeesValue + tax - discount, 0);
 
-        // Calculate total items count
-        const totalItems = cart.items.reduce((sum, item) => sum + item.quantity, 0);
+        const totalItems = cart.items.reduce((sum, x) => sum + x.quantity, 0);
 
-        // Create or update order summary
-        let orderSummary = await OrderSummary.findOne({cartId});
-
-        const summaryData = {
+        // -------------------------------------------------------
+        // SAVE SUMMARY
+        // -------------------------------------------------------
+        const payload = {
             cartId,
-            userId: userId || null,
-            items: detailedItems.map(it => ({
-                ...it,
-                shippingClassId: (cart.items.find(ci => String(ci.productId) === String(it.productId))?.shippingClassId) || null
-            })),
+            userId,
+            items,
             subtotal,
-            shipping: shippingCost,
-            discount: cart.discount || 0,
+            shipping: shippingTotal,
+            marketplaceFees: marketFeesValue,
+            discount,
             tax,
             total,
             totalItems,
-            shippingAddress: resolvedShippingAddress,
+            shippingAddress: resolvedAddress,
             priceBreakdown: {
-                itemsTotal: subtotal, shipping: shippingCost, tax: tax, discount: cart.discount || 0, grandTotal: total
+                itemsTotal: subtotal,
+                shipping: shippingTotal,
+                marketplaceFees: marketFeesValue,
+                tax,
+                discount,
+                grandTotal: total
             }
         };
 
-        if (orderSummary) {
-            orderSummary = await OrderSummary.findByIdAndUpdate(orderSummary._id, summaryData, {new: true});
+        let summary = await OrderSummary.findOne({ cartId });
+
+        if (summary) {
+            summary = await OrderSummary.findByIdAndUpdate(summary._id, payload, { new: true });
         } else {
-            orderSummary = new OrderSummary(summaryData);
-            await orderSummary.save();
+            summary = await OrderSummary.create(payload);
         }
 
         return res.status(200).json({
-            success: true, message: 'Order summary generated successfully', data: {
-                ...orderSummary.toObject(), summary: {
+            success: true,
+            message: "Order summary generated",
+            data: {
+                ...summary.toObject(),
+                summary: {
                     totalItems,
-                    subtotal: `$${subtotal.toFixed(2)}`,
-                shipping: `$${shippingCost.toFixed(2)}`,
-                tax: `$${tax.toFixed(2)}`,
-                discount: `$${(cart.discount || 0).toFixed(2)}`,
-                total: `$${total.toFixed(2)}`
+                    subtotal: subtotal.toFixed(2),
+                    shipping: shippingTotal.toFixed(2),
+                    marketplaceFees: marketFeesValue.toFixed(2),
+                    tax: tax.toFixed(2),
+                    discount: discount.toFixed(2),
+                    total: total.toFixed(2)
                 }
             }
         });
+
     } catch (error) {
-        console.error('Generate order summary error:', error);
+        console.error("Generate order summary error:", error);
         return res.status(500).json({
-            success: false, message: 'Error generating order summary', error: error.message
+            success: false,
+            message: "Server error",
+            error: error.message
         });
     }
 };
