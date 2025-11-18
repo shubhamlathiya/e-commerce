@@ -374,7 +374,7 @@ const deleteUploadedImage = async (url) => {
 
 module.exports = {
     singleImageUpload,
-    multipleImageUpload,
+    combinedImageUpload : multipleImageUpload,
     categoryMediaUpload,
     deleteUploadedImage
 };
