@@ -296,4 +296,60 @@ router.post('/admin/refund',
     walletController.processRefund
 );
 
+// /**
+//  * @swagger
+//  * /api/wallet/add-money:
+//  *   post:
+//  *     summary: Add money to user's wallet via payment gateway
+//  *     tags: [Wallet]
+//  *     security:
+//  *       - bearerAuth: []
+//  *     requestBody:
+//  *       required: true
+//  *       content:
+//  *         application/json:
+//  *           schema:
+//  *             type: object
+//  *             required:
+//  *               - amount
+//  *               - paymentMethod
+//  *             properties:
+//  *               amount:
+//  *                 type: number
+//  *                 example: 1000
+//  *               paymentMethod:
+//  *                 type: string
+//  *                 example: "razorpay"
+//  *     responses:
+//  *       200:
+//  *         description: Payment initiated successfully
+//  *         content:
+//  *           application/json:
+//  *             schema:
+//  *               type: object
+//  *               properties:
+//  *                 success:
+//  *                   type: boolean
+//  *                 orderId:
+//  *                   type: string
+//  *                 amount:
+//  *                   type: number
+//  *                 currency:
+//  *                   type: string
+//  *                 key:
+//  *                   type: string
+//  *                 description:
+//  *                   type: string
+//  *       400:
+//  *         description: Invalid amount or payment method
+//  */
+// router.post('/add-money',
+//     authenticateJWT,
+//     [
+//         check('amount').isNumeric().isFloat({ min: 10 }).withMessage('Minimum amount is ₹10'),
+//         check('paymentMethod').isIn(['razorpay', 'wallet']).withMessage('Valid payment method is required')
+//     ],
+//     walletController.addMoneyToWallet
+// );
+
 module.exports = router;
