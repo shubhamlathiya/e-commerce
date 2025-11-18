@@ -5,14 +5,11 @@ const OrderHistory = require('../../models/orders/orderHistoryModel');
 const OrderReturn = require('../../models/orders/orderReturnModel');
 const OrderReplacement = require('../../models/orders/orderReplacementModel');
 const NotificationLog = require('../../models/notifications/notificationLogModel');
-const ShippingRule = require('../../models/shipping/shippingRuleModel');
 const UserAddress = require('../../models/shipping/userAddressModel');
 const Refund = require('../../models/orders/refundModel');
 const User = require('../../models/auth/userModel');
-const Variant = require('../../models/productCatalog/productVariantModel');
 const nodemailer = require('nodemailer');
 const { createNotification } = require('../notifications/notificationController');
-const { calculateShipping } = require('../../utils/shipping/calculateShipping');
 const ShippingZone = require("../../models/shipping/shippingZoneModel");
 
 /**
