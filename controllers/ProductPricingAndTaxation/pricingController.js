@@ -53,7 +53,6 @@ exports.getProductPricing = async (req, res) => {
                 return res.status(404).json({ message: "No pricing found for this product" });
             return res.json(allForProduct);
         }
-        console.log(doc)
         // Found a specific record
         res.json(doc);
     } catch (err) {

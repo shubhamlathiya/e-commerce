@@ -12,7 +12,6 @@ exports.createAttribute = async (req, res) => {
         }
 
         const { name, slug, type, values = [], isFilter = true, status = true } = req.body;
-        console.log(req.body)
         const finalSlug = slug || slugify(name);
         const exists = await Attribute.findOne({ slug: finalSlug });
         if (exists) return res.status(409).json({ success: false, message: 'Slug already exists' });

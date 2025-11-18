@@ -28,7 +28,7 @@ function slugify(text) {
 
 exports.createProduct = async (req, res) => {
     try {
-        console.log("Creating product - req.body:", req.body);
+        // console.log("Creating product - req.body:", req.body);
         // console.log("req.processedImage:", req.processedImage);
         // console.log("req.processedImages:", req.processedImages);
 
@@ -340,7 +340,7 @@ async function handleVariantProductCreation(product, variants) {
             return null;
         }).filter(attr => attr !== null);
 
-        console.log("Valid attributes:", validAttributes);
+
 
         // Use price if basePrice not provided
         const actualBasePrice = basePrice !== undefined ? basePrice : price;
@@ -596,7 +596,6 @@ exports.listProducts = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const {id} = req.params;
-        console.log("Updating product - req.body:", req.body);
 
         // Check if product exists
         const existingProduct = await Product.findById(id);

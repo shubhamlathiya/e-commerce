@@ -53,11 +53,13 @@ router.get('/google', passport.authenticate('google', {
 router.get('/google/callback', (req, res, next) => {
     passport.authenticate('google', async (err, user) => {
         if (err) {
-            return res.redirect(`${process.env.FRONTEND_URL}/api/auth/error?message=${encodeURIComponent(err.message)}`);
+            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=${encodeURIComponent(err.message)}`;
+            return res.redirect(errorUrl);
         }
 
         if (!user) {
-            return res.redirect(`${process.env.FRONTEND_URL}/api/auth/error?message=Authentication failed`);
+            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=Authentication failed`;
+            return res.redirect(errorUrl);
         }
 
         try {
@@ -77,19 +79,57 @@ router.get('/google/callback', (req, res, next) => {
 
             // Set refresh token in HTTP-only cookie
             res.cookie('refreshToken', refreshToken.token, {
-                httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', // Less strict for redirects
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'lax',
                 maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
             });
 
-            // Redirect to frontend with access token
-            return res.redirect(`${process.env.FRONTEND_URL}/api/auth/success?accessToken=${accessToken}`);
+            // Get base URL dynamically and redirect
+            const baseUrl = getBaseUrl(req);
+            return res.redirect(`${baseUrl}/api/auth/success?accessToken=${accessToken}`);
         } catch (error) {
             console.error('Social login error:', error);
-            return res.redirect(`${process.env.FRONTEND_URL}/api/auth/error?message=Server error`);
+            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=Server error`;
+            return res.redirect(errorUrl);
         }
     })(req, res, next);
 });
 
+// Helper function to determine base URL based on request
+function getBaseUrl(req) {
+    // Check query parameter for source
+    const source = req.query.source;
+
+    // Check headers for mobile app
+    const userAgent = req.headers['user-agent'] || '';
+    const isMobileApp = source === 'mobile-app' ||
+        userAgent.includes('Expo') ||
+        userAgent.includes('Android') ||
+        userAgent.includes('iOS') ||
+        req.headers['x-requested-with'] === 'com.yourapp.package';
+
+    // Check referer or origin header for website
+    const referer = req.headers.referer || '';
+    const origin = req.headers.origin || '';
+
+    console.log('User-Agent:', userAgent);
+    console.log('Referer:', referer);
+    console.log('Origin:', origin);
+    console.log('Source param:', source);
+    console.log('Is Mobile App:', isMobileApp);
+
+    if (isMobileApp) {
+        // For mobile app, use the app scheme for deep linking
+        return process.env.MOBILE_APP_SCHEME || 'yourapp://auth';
+    } else if (referer.includes('localhost') || origin.includes('localhost') ||
+        referer.includes('your-website-domain') || origin.includes('your-website-domain')) {
+        return process.env.FRONTEND_URL || 'http://localhost:3000';
+    } else {
+        // Default fallback
+        return process.env.FRONTEND_URL || 'http://localhost:3000';
+    }
+}
 /**
  * @swagger
  * /api/auth/social/facebook:
@@ -125,7 +165,7 @@ router.get('/facebook', passport.authenticate('facebook', {
  */
 router.get('/facebook/callback', (req, res, next) => {
     passport.authenticate('facebook', async (err, user) => {
-        // console.log("hy")
+
         if (err) {
             console.log(err)
             return res.redirect(`${process.env.FRONTEND_URL}/api/auth/error?message=${encodeURIComponent(err.message)}`);
@@ -135,7 +175,6 @@ router.get('/facebook/callback', (req, res, next) => {
             return res.redirect(`${process.env.FRONTEND_URL}/api/auth/error?message=Authentication failed`);
         }
 
-        // console.log("hy")
         try {
             // Create device record
             const deviceInfo = {
@@ -150,14 +189,14 @@ router.get('/facebook/callback', (req, res, next) => {
             // Generate tokens
             const accessToken = generateAccessToken(user);
             const refreshToken = await generateRefreshToken(user, device._id);
-            console.log("hy 1")
+
             // Set refresh token in HTTP-only cookie
             res.cookie('refreshToken', refreshToken.token, {
                 httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'lax', // Less strict for redirects
                 maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
             });
 
-            console.log("hy 1")
+
             // Redirect to frontend with access token
             return res.redirect(`${process.env.FRONTEND_URL}/api/auth/success?accessToken=${accessToken}`);
         } catch (error) {

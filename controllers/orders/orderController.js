@@ -66,7 +66,7 @@ exports.createOrder = async (req, res) => {
         if (!summary) {
             summary = await OrderSummary.findOne({ cartId }).lean();
         }
-        console.log(summary)
+
         if (!summary) {
             return res.status(404).json({
                 success: false,
@@ -256,7 +256,7 @@ exports.getOrderById = async (req, res) => {
                 success: false, message: 'Order not found'
             });
         }
-        // console.log(order)
+
         // Transform order for frontend display
         const transformedOrder = await transformOrderData(order);
 
@@ -281,7 +281,7 @@ async function transformOrderData(order) {
     const items = order.items.map(item => {
         const product = item.productId || {};
         const variant = item.variantId || {};
-        console.log(product)
+
         const productName = product.title || `Product ${item.productId}`;
         const brand = product.brandId?.name || null;
         const brandLogo = product.brandId?.logo || null;
@@ -586,7 +586,6 @@ exports.getUserOrders = async (req, res) => {
         });
 
         const total = await Order.countDocuments(query);
-        console.log(transformedOrders[0])
         return res.status(200).json({
             success: true,
             count: transformedOrders.length,

@@ -16,9 +16,7 @@ const {otpStore} = require("../../utils/auth/otpStore");
  */
 exports.enable2FA = async (req, res) => {
     try {
-        console.log(req.headers);
         const userId = req.user.id;
-        console.log(userId)
         const {method} = req.body;
 
         if (!['email', 'phone', 'app'].includes(method)) {
@@ -136,7 +134,6 @@ exports.verify2FA = async (req, res) => {
         }
 
         const user = await User.findById(userId);
-        console.log(user)
         if (!user || !user.profile || !user.profile.twoFactorAuth) {
             return res.status(404).json({
                 success: false, message: 'User or 2FA setup not found'
@@ -247,8 +244,7 @@ exports.disable2FA = async (req, res) => {
     try {
         const userId = req.user.id;
         const {password} = req.body;
-        console.log(req.body.password)
-        console.log(password)
+
         // For security, require password to disable 2FA
         if (!password) {
             return res.status(400).json({
@@ -341,7 +337,6 @@ exports.authenticate2FA = async (req, res) => {
             });
         } else if (method === 'email' || method === 'phone') {
             const otpData = otpStore[method]?.[userId];
-            console.log(otpStore)
             if (otpData && otpData.otp === token && new Date() <= otpData.expires) {
                 verified = true;
                 delete otpStore[method][userId];

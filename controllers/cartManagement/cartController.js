@@ -132,10 +132,7 @@ exports.getCart = async (req, res) => {
             subtotal + shippingTotal + marketFeesValue - discount,
             0
         );
-        console.log(subtotal)
-        // -------------------------------------------------------
-        //  RESPONSE
-        // -------------------------------------------------------
+
         return res.status(200).json({
             success: true,
             message: "Cart retrieved",
@@ -368,8 +365,6 @@ exports.removeItem = async (req, res) => {
     try {
 
         const {productId, variantId, sessionId} = req.body;
-        console.log(req.body)
-        console.log(sessionId)
 
         let cart = await Cart.findOne({sessionId});
 
@@ -605,7 +600,6 @@ exports.applyCoupon = async (req, res) => {
         });
 
         await cart.save();
-        console.log(cart)
         return res.status(200).json({
             success: true,
             message: 'Coupon applied successfully',

@@ -30,10 +30,8 @@ exports.register = async (req, res) => {
                 errors: errors.array()
             });
         }
-        // console.log(errors);
         const {email, phone, password, name} = req.body;
-        console.log(req.body);
-        console.log({email, phone, password, name});
+
         // Ensure at least email or phone is provided
         if (!email && !phone) {
             return res.status(400).json({
@@ -52,7 +50,6 @@ exports.register = async (req, res) => {
             existingUser = await User.findOne({ phone });
         }
 
-        console.log(existingUser)
         if (existingUser) {
             return res.status(409).json({
                 success: false,
@@ -372,7 +369,7 @@ exports.resendVerification = async (req, res) => {
  */
 exports.login = async (req, res) => {
     try {
-        console.log(req.ip)
+
         const {email, phone, password} = req.body;
 
         // Ensure either email or phone is provided

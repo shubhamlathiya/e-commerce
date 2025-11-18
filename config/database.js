@@ -14,7 +14,6 @@ const connectDB = async () => {
             autoIndex: true,
         });
 
-        console.log(`MongoDB Connected: ${conn.connection.host}`);
 
         await initializeAdmin();
 
@@ -38,7 +37,7 @@ const initializeAdmin = async () => {
                 displayName: 'Administrator',
                 description: 'Full access to all system features and settings',
             });
-            console.log('Admin role created');
+
         } else {
             console.log('Admin role already exists');
         }

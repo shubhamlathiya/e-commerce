@@ -106,7 +106,6 @@ module.exports = function () {
         passReqToCallback: true
     }, async (req, accessToken, refreshToken, profile, done) => {
         try {
-            console.log(profile);
             // Check if user already exists with this social account
             let socialAccount = await SocialAccount.findOne({
                 provider: 'facebook',

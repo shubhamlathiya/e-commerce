@@ -238,7 +238,7 @@ exports.getRecaptchaSettings = async (req, res) => {
                 message: 'reCAPTCHA settings not found'
             });
         }
-        console.log(settings)
+
         res.json({
             success: true,
             data: settings

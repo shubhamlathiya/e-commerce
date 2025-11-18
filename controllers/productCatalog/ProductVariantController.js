@@ -2,27 +2,26 @@ const ProductVariant = require('../../models/productCatalog/productVariantModel'
 const Product = require('../../models/productCatalog/ProductModel');
 
 exports.createVariant = async (req, res) => {
-    // try {
-    console.log(req.body);
-    const {productId, sku, attributes = [], price, compareAtPrice, stock = 0, barcode, status = true} = req.body;
-    const product = await Product.findById(productId).lean();
-    if (!product) return res.status(400).json({message: 'Invalid productId'});
-    console.log("variant")
+    try {
+        const {productId, sku, attributes = [], price, compareAtPrice, stock = 0, barcode, status = true} = req.body;
+        const product = await Product.findById(productId).lean();
+        if (!product) return res.status(400).json({message: 'Invalid productId'});
 
-    const doc = await ProductVariant.create({
-        productId,
-        sku,
-        attributes,
-        price,
-        compareAtPrice,
-        stock,
-        barcode,
-        status
-    });
-    res.status(201).json(doc);
-    // } catch (err) {
-    //     res.status(400).json({message: err.message});
-    // }
+
+        const doc = await ProductVariant.create({
+            productId,
+            sku,
+            attributes,
+            price,
+            compareAtPrice,
+            stock,
+            barcode,
+            status
+        });
+        res.status(201).json(doc);
+    } catch (err) {
+        res.status(400).json({message: err.message});
+    }
 };
 
 exports.getVariant = async (req, res) => {
@@ -47,7 +46,6 @@ exports.listVariants = async (req, res) => {
         const skip = (Number(page) - 1) * Number(limit);
         const items = await ProductVariant.find(q).sort(sort).skip(skip).limit(Number(limit)).lean();
         const total = await ProductVariant.countDocuments(q);
-        console.log(items);
         res.json({items, total, page: Number(page), limit: Number(limit)});
     } catch (err) {
         res.status(400).json({message: err.message});
@@ -55,17 +53,15 @@ exports.listVariants = async (req, res) => {
 };
 
 exports.updateVariant = async (req, res) => {
-    // try {
-    const {id} = req.params;
-    console.log(req.body);
-    const update = {...req.body};
-    const doc = await ProductVariant.findByIdAndUpdate(id, update, {new: true}).lean();
-    console.log(doc)
-    if (!doc) return res.status(404).json({message: 'Variant not found'});
-    res.json(doc);
-    // } catch (err) {
-    //     res.status(400).json({message: err.message});
-    // }
+    try {
+        const {id} = req.params;
+        const update = {...req.body};
+        const doc = await ProductVariant.findByIdAndUpdate(id, update, {new: true}).lean();
+        if (!doc) return res.status(404).json({message: 'Variant not found'});
+        res.json(doc);
+    } catch (err) {
+        res.status(400).json({message: err.message});
+    }
 };
 
 exports.deleteVariant = async (req, res) => {

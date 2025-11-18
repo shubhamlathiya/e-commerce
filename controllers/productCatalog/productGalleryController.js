@@ -44,8 +44,6 @@ exports.addGalleryImages = async (req, res) => {
         const { productId } = req.params;
         const { altTexts = [] } = req.body;
 
-        console.log("Adding gallery images - req.processedImages:", req.processedImages);
-        console.log("Alt texts:", altTexts);
 
         // Check if product exists
         const product = await Product.findById(productId);
@@ -121,8 +119,6 @@ exports.addGalleryImages = async (req, res) => {
 exports.replaceGallery = async (req, res) => {
     try {
         const { productId } = req.params;
-
-        console.log("Replacing gallery - req.processedImages:", req.processedImages);
 
         // Check if product exists
         const product = await Product.findById(productId);
