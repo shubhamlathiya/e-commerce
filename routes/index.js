@@ -40,7 +40,7 @@ const settingsRoutes = require('././settings/settingsRoutes');
 const supportRoutes = require('././support/supportRoutes');
 const refundRoutes = require('././orders/refundRoutes');
 const notificationRoutes = require('././notifications/notificationRoutes');
-
+const negotiationRoutes = require('././negotiation/bulkNegotiationRoutes');
 // Auth routes
 router.use('/api/auth', authRoutes);
 router.use('/api/auth', passwordRoutes);
@@ -80,6 +80,7 @@ router.use('/api/orders', orderRoutes);
 router.use('/api/order', orderRoutes);
 router.use('/api/wallet', walletRoutes);
 router.use('/api/transactions', transactionRoutes);
+router.use('/api/negotiation', negotiationRoutes);
 
 router.use('/api/marketing', marketingRoutes);
 router.use('/api/analytics', analyticsRoutes);

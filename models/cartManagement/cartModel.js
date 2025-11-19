@@ -9,7 +9,7 @@ const CartItemSchema = new Schema({
     },
     variantId: {
         type: Schema.Types.ObjectId,
-        ref: 'Variant'
+        ref: 'ProductVariant'
     },
     shippingCharge: {
         type: Number,
@@ -28,6 +28,9 @@ const CartItemSchema = new Schema({
         type: Number,
         required: true
     },
+    originalPrice: { type: Number },
+    negotiatedPrice: { type: Number },
+    negotiationId: { type: Schema.Types.ObjectId, ref: 'BulkNegotiation' },
     addedAt: {
         type: Date,
         default: Date.now

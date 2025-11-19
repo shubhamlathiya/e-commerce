@@ -30,7 +30,7 @@ const {authenticateJWT} = require('../../middleware/authMiddleware');
  *       400:
  *         description: Invalid sessionId
  */
-router.get('/',
+router.get('/',authenticateJWT,
     [
         check('sessionId').optional().isString()
     ],
@@ -75,7 +75,7 @@ router.get('/',
  *       400:
  *         description: Validation error
  */
-router.post('/item',
+router.post('/item', authenticateJWT,
     [
         check('productId').isMongoId().withMessage('Valid product ID is required'),
         check('variantId').optional().isMongoId(),

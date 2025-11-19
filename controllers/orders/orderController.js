@@ -1025,7 +1025,6 @@ exports.generateOrderSummary = async (req, res) => {
     }
 };
 
-
 /**
  * Request order return
  */

@@ -1,6 +1,5 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/auth/userModel');
-const {Logform} = require("winston");
 
 /**
  * Middleware to authenticate JWT token

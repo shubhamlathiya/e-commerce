@@ -1,37 +1,72 @@
 const Cart = require('../../models/cartManagement/cartModel');
 const Product = require('../../models/productCatalog/ProductModel');
-const Variant = require('../../models/productCatalog/productVariantModel');
+const ProductVariant = require('../../models/productCatalog/productVariantModel');
 const Coupon = require('../../models/offersAndDiscounts/couponModel');
 const ProductPricing = require('../../models/productPricingAndTaxation/productPricingModel')
 const UserAddress = require('../../models/shipping/userAddressModel');
 const ShippingZone = require("../../models/shipping/shippingZoneModel");
+const TierPricing = require('../../models/productPricingAndTaxation/tierPricingModel'); // Add this import
+const User = require('../../models/auth/userModel');
+
 
 exports.getCart = async (req, res) => {
     try {
         const { sessionId, addressId } = req.query;
         const userId = req.user ? req.user.id : null;
 
+        // Detect business user
+        let isBusinessUser = false;
+        if (req.user && req.user.loginType === "business") {
+            isBusinessUser = true;
+        } else if (req.query.loginType === "business") {
+            isBusinessUser = true;
+        }
+
         if (!sessionId && !userId) {
             return res.status(400).json({
                 success: false,
-                message: "Either sessionId or user is required"
+                message: "Either sessionId or userId is required"
             });
         }
 
-        const query = userId && sessionId
-            ? { $or: [{ sessionId }, { userId }] }
-            : userId ? { userId } : { sessionId };
+        const query =
+            userId && sessionId
+                ? { userId, sessionId }
+                : sessionId
+                    ? { sessionId }
+                    : { userId };
 
-        const cart = await Cart.findOne(query).lean();
+
+        // -------------------------------------------------------
+        // LOAD CART WITH POPULATION (same as summary)
+        // -------------------------------------------------------
+        const cart = await Cart.findOne(query)
+            .populate({
+                path: "items.productId",
+                select: "title images price finalPrice brandId categoryIds description sku stock shipping",
+                populate: { path: "brandId", select: "name logo" }
+            })
+            .populate({
+                path: "items.variantId",
+                model: "ProductVariant",
+                select: "attributes price stock sku images"
+            })
+            .lean();
+
         if (!cart) {
-            return res.status(404).json({
-                success: false,
-                message: "Cart not found"
+            return res.status(404).json({ success: false, message: "Cart not found" });
+        }
+
+        if (!cart.items.length) {
+            return res.status(200).json({
+                success: true,
+                message: "Cart is empty",
+                data: { items: [], totals: {} }
             });
         }
 
         // -------------------------------------------------------
-        //  RESOLVE ADDRESS
+        // RESOLVE SHIPPING ADDRESS
         // -------------------------------------------------------
         let resolvedAddress = null;
 
@@ -55,7 +90,7 @@ exports.getCart = async (req, res) => {
         }
 
         // -------------------------------------------------------
-        //  MARKET FEES
+        // MARKET FEES (same as summary)
         // -------------------------------------------------------
         let marketFeesValue = 0;
 
@@ -74,62 +109,81 @@ exports.getCart = async (req, res) => {
         }
 
         // -------------------------------------------------------
-        //  POPULATE CART ITEMS
+        // BUILD CART ITEMS CONSISTENT WITH SUMMARY
         // -------------------------------------------------------
-        const populatedItems = await Promise.all(
+        let subtotal = 0;
+        let shippingTotal = 0;
+
+        const items = await Promise.all(
             cart.items.map(async (item) => {
-                const product = await Product.findById(item.productId)
-                    .select("title thumbnail price shipping")
-                    .lean();
+                const product = item.productId || {};
+                const variant = item.variantId || {};
 
-                const variant = item.variantId
-                    ? await Variant.findById(item.variantId)
-                        .select("price sku stock")
-                        .lean()
-                    : null;
+                // Primary image
+                const image =
+                    variant.images?.[0] ||
+                    product.images?.[0] ||
+                    null;
 
-                // Pricing priority: Variant → Product → Stored Final
-                const price =
-                    variant?.price ??
-                    product?.price ??
-                    item.finalPrice;
+                // BUSINESS TIER PRICING
+                let unitPrice =
+                    item.finalPrice ??
+                    variant.price ??
+                    product.finalPrice ??
+                    product.price ??
+                    0;
 
-                const subtotal = item.finalPrice * item.quantity;
+                if (isBusinessUser) {
+                    const tier = await TierPricing.findOne({
+                        productId: item.productId?._id,
+                        variantId: item.variantId?._id || null,
+                        minQty: { $lte: item.quantity },
+                        maxQty: { $gte: item.quantity }
+                    }).lean();
 
-                // Shipping charged once per product
-                const shippingCharge =
-                    item.shippingCharge ??
-                    Number(product?.shipping?.cost || 0);
+                    if (tier) {
+                        unitPrice = tier.price;
+                    }
+                }
+
+                const finalPrice = unitPrice * item.quantity;
+                subtotal += finalPrice;
+
+                const shippingCharge = Number(product?.shipping?.cost || 0);
+                shippingTotal += shippingCharge;
+
+                const variantAttributes = (variant.attributes || [])
+                    .map(a => `${a.name}: ${a.value}`)
+                    .join(", ");
 
                 return {
-                    ...item,
-                    product,
-                    variant,
-                    price,
-                    subtotal,
+                    _id: item._id,
+                    productId: product._id,
+                    variantId: variant._id || null,
+                    quantity: item.quantity,
+                    name: product.title,
+                    image,
+                    sku: variant.sku || product.sku,
+                    unitPrice,
+                    finalPrice,
+                    subtotal: finalPrice,
+                    variantAttributes,
                     shippingCharge,
-                    shippingTotal: shippingCharge
+                    product,
+                    variant
                 };
             })
         );
 
         // -------------------------------------------------------
-        //  TOTALS
+        // TOTALS (following summary logic)
         // -------------------------------------------------------
-        const subtotal = populatedItems.reduce(
-            (sum, x) => sum + x.subtotal,
-            0
-        );
-
-        const shippingTotal = populatedItems.reduce(
-            (sum, x) => sum + (x.shippingTotal || 0),
-            0
-        );
-
-        const discount = cart.discount ?? 0;
+        const discount = Number(cart.discount || 0);
+        const taxRate = 0.05;
+        const tax = subtotal * taxRate;
 
         const totalPayable = Math.max(
-            subtotal + shippingTotal + marketFeesValue - discount,
+            subtotal + shippingTotal + marketFeesValue + tax - discount,
             0
         );
 
@@ -138,21 +192,23 @@ exports.getCart = async (req, res) => {
             message: "Cart retrieved",
             data: {
                 cartId: cart._id,
-                sessionId: cart.sessionId,
                 userId: cart.userId,
-                items: populatedItems,
+                sessionId: cart.sessionId,
+                items,
+                userType: isBusinessUser ? "business" : "regular",
                 totals: {
                     subtotal,
                     shipping: shippingTotal,
-                    discount,
                     marketplaceFees: marketFeesValue,
+                    tax,
+                    discount,
                     totalPayable
                 }
             }
         });
 
     } catch (error) {
-        console.error("Cart error:", error);
+        console.error("Get cart error:", error);
         return res.status(500).json({
             success: false,
             message: "Server error",
@@ -162,12 +218,22 @@ exports.getCart = async (req, res) => {
 };
 
 /**
- * Add item to cart
+ * Add item to cart with business user tier pricing
  */
 exports.addItem = async (req, res) => {
     try {
         const { productId, variantId, quantity, sessionId } = req.body;
         const userId = req.user ? req.user.id : null;
+
+        let isBusinessUser = false;
+        if (req.user && req.user.loginType === 'business') {
+            isBusinessUser = true;
+        } else if (req.body.loginType === 'business') {
+            isBusinessUser = true;
+        }
+
+        console.log('Business User:', isBusinessUser);
+        console.log('Session ID:', sessionId);
 
         if (!sessionId) {
             return res.status(400).json({ success: false, message: "Session ID is required" });
@@ -176,8 +242,27 @@ exports.addItem = async (req, res) => {
             return res.status(400).json({ success: false, message: "Product ID is required" });
         }
 
-        const qty = Number(quantity);
-        if (!qty || qty <= 0) {
+        let finalQuantity = Number(quantity);
+
+        // Check minimum quantity for business users
+        if (isBusinessUser) {
+            const tierPricing = await TierPricing.findOne({
+                productId,
+                variantId: variantId || null
+            }).sort({ minQty: 1 });
+
+            if (tierPricing) {
+                const minRequiredQty = tierPricing.minQty;
+
+                // If qty is less than minimum, automatically set it
+                if (finalQuantity < minRequiredQty) {
+                    console.log(`Business user qty updated from ${finalQuantity} to min tier qty ${minRequiredQty}`);
+                    finalQuantity = minRequiredQty;
+                }
+            }
+        }
+
+        if (!finalQuantity || finalQuantity <= 0) {
             return res.status(400).json({ success: false, message: "Quantity must be positive" });
         }
 
@@ -192,37 +277,57 @@ exports.addItem = async (req, res) => {
         // VARIANT
         let variant = null;
         if (variantId) {
-            variant = await Variant.findOne({ _id: variantId, productId }).lean();
+            variant = await ProductVariant.findOne({ _id: variantId, productId }).lean();
             if (!variant) {
                 return res.status(404).json({ success: false, message: "Variant not found for this product" });
             }
         }
 
-        // PRICING
-        let pricing = null;
+        // PRICING - Apply tier pricing for business users first
+        let finalPrice = 0;
+        let basePrice = 0;
 
-        if (variantId) {
-            pricing = await ProductPricing.findOne({
+        if (isBusinessUser) {
+            const tierPricing = await TierPricing.findOne({
                 productId,
-                variantId,
-                status: true
-            }).lean();
+                variantId: variantId || null,
+                minQty: { $lte: finalQuantity },
+                maxQty: { $gte: finalQuantity }
+            });
+
+            if (tierPricing) {
+                finalPrice = tierPricing.price;
+                basePrice = tierPricing.price;
+            }
         }
 
-        if (!pricing) {
-            pricing = await ProductPricing.findOne({
-                productId,
-                variantId: null,
-                status: true
-            }).lean();
-        }
+        // If no tier pricing found or not business user, use regular pricing
+        if (finalPrice === 0) {
+            let pricing = null;
 
-        if (!pricing) {
-            return res.status(404).json({ success: false, message: "Pricing not found" });
-        }
+            if (variantId) {
+                pricing = await ProductPricing.findOne({
+                    productId,
+                    variantId,
+                    status: true
+                }).lean();
+            }
 
-        const basePrice = Number(pricing.basePrice || 0);
-        const finalPrice = Number(pricing.finalPrice || basePrice);
+            if (!pricing) {
+                pricing = await ProductPricing.findOne({
+                    productId,
+                    variantId: null,
+                    status: true
+                }).lean();
+            }
+
+            if (!pricing) {
+                return res.status(404).json({ success: false, message: "Pricing not found" });
+            }
+
+            basePrice = Number(pricing.basePrice || 0);
+            finalPrice = Number(pricing.finalPrice || basePrice);
+        }
 
         // CART
         let cart = await Cart.findOne({ sessionId });
@@ -247,24 +352,24 @@ exports.addItem = async (req, res) => {
         if (existingItemIndex > -1) {
             // UPDATE
             const existing = cart.items[existingItemIndex];
-            existing.quantity += qty;
+            existing.quantity += finalQuantity;
             existing.finalPrice = finalPrice;
             existing.price = basePrice;
-            existing.shippingCharge = shippingCharge; // updated field
+            existing.shippingCharge = shippingCharge;
         } else {
             // ADD
             cart.items.push({
                 productId,
                 variantId: variantId || null,
-                quantity: qty,
+                quantity: finalQuantity,
                 price: basePrice,
                 finalPrice,
-                shippingCharge, // matches schema
+                shippingCharge,
                 addedAt: new Date()
             });
         }
 
-        // RECALCULATE CART TOTAL (no shipping included here)
+        // RECALCULATE CART TOTAL
         cart.cartTotal = cart.items.reduce((total, item) => {
             return total + Number(item.finalPrice) * Number(item.quantity);
         }, 0);
@@ -279,7 +384,8 @@ exports.addItem = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: "Item added to cart",
-            data: cart
+            data: cart,
+            userType: isBusinessUser ? 'business' : 'regular'
         });
 
     } catch (error) {
@@ -293,21 +399,31 @@ exports.addItem = async (req, res) => {
 };
 
 /**
- * Update item quantity in cart
+ * Update item quantity in cart with business user validation
  */
 exports.updateItemQuantity = async (req, res) => {
     try {
-        const {itemId} = req.params;
-        const {sessionId, quantity} = req.body;
+        const { itemId } = req.params;
+        const { sessionId, quantity } = req.body;
+        const userId = req.user ? req.user.id : null;
 
-        if (quantity < 1) {
+        // Get loginType from user object or request body
+        let isBusinessUser = false;
+        if (req.user && req.user.loginType === 'business') {
+            isBusinessUser = true;
+        } else if (req.body.loginType === 'business') {
+            isBusinessUser = true;
+        }
+
+        const finalQuantity = Number(quantity);
+        if (finalQuantity < 1) {
             return res.status(400).json({
                 success: false,
                 message: 'Quantity must be at least 1'
             });
         }
 
-        let cart = await Cart.findOne({sessionId});
+        let cart = await Cart.findOne({ sessionId });
 
         if (!cart) {
             return res.status(404).json({
@@ -328,8 +444,39 @@ exports.updateItemQuantity = async (req, res) => {
             });
         }
 
+        const item = cart.items[itemIndex];
+
+        // Check minimum quantity for business users
+        if (isBusinessUser) {
+            const tierPricing = await TierPricing.findOne({
+                productId: item.productId,
+                variantId: item.variantId || null,
+                minQty: { $lte: finalQuantity }
+            }).sort({ minQty: -1 });
+
+            if (tierPricing && finalQuantity < tierPricing.minQty) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Minimum quantity for this product is ${tierPricing.minQty} for business users`
+                });
+            }
+
+            // Apply tier pricing if quantity changes
+            const applicableTier = await TierPricing.findOne({
+                productId: item.productId,
+                variantId: item.variantId || null,
+                minQty: { $lte: finalQuantity },
+                maxQty: { $gte: finalQuantity }
+            });
+
+            if (applicableTier) {
+                item.finalPrice = applicableTier.price;
+                item.price = applicableTier.price;
+            }
+        }
+
         // Update quantity
-        cart.items[itemIndex].quantity = quantity;
+        item.quantity = finalQuantity;
 
         // Recalculate cart total
         cart.cartTotal = cart.items.reduce((total, item) => {
@@ -346,7 +493,8 @@ exports.updateItemQuantity = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Item quantity updated',
-            data: cart
+            data: cart,
+            userType: isBusinessUser ? 'business' : 'regular'
         });
     } catch (error) {
         console.error('Error updating cart item:', error);
@@ -363,12 +511,14 @@ exports.updateItemQuantity = async (req, res) => {
  */
 exports.removeItem = async (req, res) => {
     try {
-
-        const {productId, variantId, sessionId} = req.body;
-
+        const {productId, variantId, sessionId,loginType} = req.body;
+        const userId = req.user ? req.user.id : null;
+        const isBusinessUser = loginType === 'business';
+        console.log(req.body);
         let cart = await Cart.findOne({sessionId});
 
         if (!cart) {
+            console.log(cart)
             return res.status(404).json({
                 success: false,
                 message: 'Cart not found'
@@ -407,7 +557,8 @@ exports.removeItem = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Item removed from cart',
-            data: cart
+            data: cart,
+            userType: isBusinessUser ? 'business' : 'regular'
         });
     } catch (error) {
         console.error('Error removing item from cart:', error);
@@ -424,7 +575,9 @@ exports.removeItem = async (req, res) => {
  */
 exports.applyCoupon = async (req, res) => {
     try {
-        const {couponCode, sessionId} = req.body;
+        const {couponCode, sessionId , loginType} = req.body;
+        const userId = req.user ? req.user.id : null;
+        const isBusinessUser = loginType === 'business';
 
         // Input validation
         if (!couponCode || typeof couponCode !== 'string' || couponCode.trim() === '') {
@@ -618,7 +771,8 @@ exports.applyCoupon = async (req, res) => {
                     savings: ((discount / subtotal) * 100).toFixed(1) + '%',
                     savingsAmount: discount
                 }
-            }
+            },
+            userType: isBusinessUser ? 'business' : 'regular'
         });
 
     } catch (error) {
@@ -678,7 +832,9 @@ exports.applyCouponToCart = async (cart, couponCode) => {
  */
 exports.removeCoupon = async (req, res) => {
     try {
-        const {sessionId} = req.body;
+        const {sessionId , loginType} = req.body;
+        const userId = req.user ? req.user.id : null;
+        const isBusinessUser = loginType === 'business';
 
         if (!sessionId) {
             return res.status(400).json({
@@ -719,7 +875,8 @@ exports.removeCoupon = async (req, res) => {
         return res.status(200).json({
             success: true,
             message: 'Coupon removed successfully',
-            data: cart
+            data: cart,
+            userType: isBusinessUser ? 'business' : 'regular'
         });
 
     } catch (error) {

@@ -141,7 +141,7 @@ exports.listCategories = async (req, res) => {
             Category.find(query).sort(sortObj).skip(skip).limit(Number(limit)),
             Category.countDocuments(query),
         ]);
-
+        console.log(items)
         return res.status(200).json({success: true, data: items, page: Number(page), limit: Number(limit), total});
     } catch (error) {
         console.error('List categories error:', error);
