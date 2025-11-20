@@ -17,9 +17,19 @@ const router = express.Router();
  *       302:
  *         description: Redirects to Google OAuth consent screen for user login.
  */
-router.get('/google', passport.authenticate('google', {
-    scope: ['profile', 'email']
-}));
+router.get('/google', (req, res, next) => {
+    const redirectUri = req.query.redirect_uri || '';
+    const source = req.query.source || 'web';
+
+    // Encode data in state
+    const state = Buffer.from(JSON.stringify({ redirectUri, source })).toString('base64');
+
+    passport.authenticate('google', {
+        scope: ['profile', 'email'],
+        prompt: 'select_account',
+        state
+    })(req, res, next);
+});
 
 /**
  * @swagger
@@ -52,18 +62,33 @@ router.get('/google', passport.authenticate('google', {
  */
 router.get('/google/callback', (req, res, next) => {
     passport.authenticate('google', async (err, user) => {
+
+        // Decode state (redirect info)
+        let redirectUri = null;
+        let source = null;
+        if (req.query.state) {
+            try {
+                const decoded = JSON.parse(
+                    Buffer.from(req.query.state, 'base64').toString()
+                );
+                redirectUri = decoded.redirectUri || null;
+                source = decoded.source || null;
+            } catch (e) {
+                console.log("State decode error:", e);
+            }
+        }
+        console.log("hy")
         if (err) {
-            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=${encodeURIComponent(err.message)}`;
+            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=${encodeURIComponent(err.message)}`;
             return res.redirect(errorUrl);
         }
 
         if (!user) {
-            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=Authentication failed`;
+            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=Authentication failed`;
             return res.redirect(errorUrl);
         }
 
         try {
-            // Create device record
             const deviceInfo = {
                 userId: user._id,
                 deviceName: req.headers['user-agent'] || 'Unknown Device',
@@ -73,63 +98,63 @@ router.get('/google/callback', (req, res, next) => {
 
             const device = await Device.create(deviceInfo);
 
-            // Generate tokens
             const accessToken = generateAccessToken(user);
             const refreshToken = await generateRefreshToken(user, device._id);
 
-            // Set refresh token in HTTP-only cookie
             res.cookie('refreshToken', refreshToken.token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+                maxAge: 7 * 24 * 60 * 60 * 1000
             });
 
-            // Get base URL dynamically and redirect
-            const baseUrl = getBaseUrl(req);
-            return res.redirect(`${baseUrl}/api/auth/success?accessToken=${accessToken}`);
+            // Pick best redirect source (state → headers → fallback)
+            const baseUrl = getBaseUrl(req, redirectUri);
+
+            return res.redirect(
+                `${baseUrl}/api/auth/success?accessToken=${accessToken}`
+            );
+
         } catch (error) {
             console.error('Social login error:', error);
-            const errorUrl = `${getBaseUrl(req)}/api/auth/error?message=Server error`;
+            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=Server error`;
             return res.redirect(errorUrl);
         }
     })(req, res, next);
 });
 
-// Helper function to determine base URL based on request
-function getBaseUrl(req) {
-    // Check query parameter for source
-    const source = req.query.source;
-
-    // Check headers for mobile app
-    const userAgent = req.headers['user-agent'] || '';
-    const isMobileApp = source === 'mobile-app' ||
-        userAgent.includes('Expo') ||
-        userAgent.includes('Android') ||
-        userAgent.includes('iOS') ||
-        req.headers['x-requested-with'] === 'com.yourapp.package';
-
-    // Check referer or origin header for website
-    const referer = req.headers.referer || '';
-    const origin = req.headers.origin || '';
-
-    console.log('User-Agent:', userAgent);
-    console.log('Referer:', referer);
-    console.log('Origin:', origin);
-    console.log('Source param:', source);
-    console.log('Is Mobile App:', isMobileApp);
-
-    if (isMobileApp) {
-        // For mobile app, use the app scheme for deep linking
-        return process.env.MOBILE_APP_SCHEME || 'yourapp://auth';
-    } else if (referer.includes('localhost') || origin.includes('localhost') ||
-        referer.includes('your-website-domain') || origin.includes('your-website-domain')) {
-        return process.env.FRONTEND_URL || 'http://localhost:3000';
-    } else {
-        // Default fallback
-        return process.env.FRONTEND_URL || 'http://localhost:3000';
+function getBaseUrl(req, stateRedirect) {
+    console.log(req)
+        // 1. Highest priority: redirectUri from state
+    if (stateRedirect) {
+        return stateRedirect;
     }
+
+    // 2. redirectUrl query
+    if (req.query.redirectUrl) {
+        return req.query.redirectUrl;
+    }
+
+    // 3. x-redirect-url header
+    if (req.headers['x-redirect-url']) {
+        return req.headers['x-redirect-url'];
+    }
+
+    // 4. referer
+    if (req.headers.referer) {
+        return req.headers.referer;
+    }
+
+    // 5. origin
+    if (req.headers.origin) {
+        return req.headers.origin;
+    }
+
+    // 6. final fallback
+    return process.env.FRONTEND_URL || 'http://localhost:8000';
 }
+
+
 /**
  * @swagger
  * /api/auth/social/facebook:
