@@ -13,7 +13,6 @@ exports.getCart = async (req, res) => {
     try {
         const { sessionId, addressId } = req.query;
         const userId = req.user ? req.user.id : null;
-
         // Detect business user
         let isBusinessUser = false;
         if (req.user && req.user.loginType === "business") {
@@ -37,9 +36,6 @@ exports.getCart = async (req, res) => {
                     : { userId };
 
 
-        // -------------------------------------------------------
-        // LOAD CART WITH POPULATION (same as summary)
-        // -------------------------------------------------------
         const cart = await Cart.findOne(query)
             .populate({
                 path: "items.productId",
@@ -65,9 +61,6 @@ exports.getCart = async (req, res) => {
             });
         }
 
-        // -------------------------------------------------------
-        // RESOLVE SHIPPING ADDRESS
-        // -------------------------------------------------------
         let resolvedAddress = null;
 
         if (addressId && userId) {
@@ -83,34 +76,42 @@ exports.getCart = async (req, res) => {
 
         if (resolvedAddress) {
             resolvedAddress = {
-                country: resolvedAddress.country,
-                state: resolvedAddress.state,
-                pincode: resolvedAddress.pincode
+                country: resolvedAddress.country?.trim().toLowerCase(),
+                state: resolvedAddress.state?.trim().toLowerCase(),
+                pincode: resolvedAddress.pincode?.trim()
             };
         }
 
-        // -------------------------------------------------------
-        // MARKET FEES (same as summary)
-        // -------------------------------------------------------
+        // console.log("Resolved Address:", resolvedAddress);
+
         let marketFeesValue = 0;
+        let zone = null;
 
-        if (resolvedAddress) {
-            const zone = await ShippingZone.findOne({
-                $or: [
-                    { pincodes: resolvedAddress.pincode },
-                    { states: resolvedAddress.state },
-                    { countries: resolvedAddress.country }
-                ]
+
+        zone = await ShippingZone.findOne({
+            pincodes: resolvedAddress.pincode
+        }).lean();
+
+        if (!zone) {
+            // 2) Try exact STATE match (case-insensitive)
+            zone = await ShippingZone.findOne({
+                states: { $in: [ resolvedAddress.state, resolvedAddress.state.charAt(0).toUpperCase() + resolvedAddress.state.slice(1) ] }
             }).lean();
-
-            if (zone) {
-                marketFeesValue = Number(zone.marketFees || 0);
-            }
         }
 
-        // -------------------------------------------------------
-        // BUILD CART ITEMS CONSISTENT WITH SUMMARY
-        // -------------------------------------------------------
+        if (!zone) {
+            // 3) Try exact COUNTRY match (case-insensitive)
+            zone = await ShippingZone.findOne({
+                countries: { $in: [ resolvedAddress.country, resolvedAddress.country.charAt(0).toUpperCase() + resolvedAddress.country.slice(1) ] }
+            }).lean();
+        }
+
+        console.log("Matched Zone:", zone);
+
+        if (zone) {
+            marketFeesValue = Number(zone.marketFees || 0);
+        }
+
         let subtotal = 0;
         let shippingTotal = 0;
 
