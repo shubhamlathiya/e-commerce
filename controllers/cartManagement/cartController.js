@@ -511,55 +511,59 @@ exports.updateItemQuantity = async (req, res) => {
  */
 exports.removeItem = async (req, res) => {
     try {
-        const {productId, variantId, sessionId,loginType} = req.body;
+        const { productId, variantId, sessionId, loginType } = req.body;
         const userId = req.user ? req.user.id : null;
         const isBusinessUser = loginType === 'business';
-        console.log(req.body);
-        let cart = await Cart.findOne({sessionId});
+
+        console.log('Remove item request body:', req.body);
+
+        // Find cart by sessionId
+        let cart = await Cart.findOne({ sessionId });
 
         if (!cart) {
-            console.log(cart)
             return res.status(404).json({
                 success: false,
                 message: 'Cart not found'
             });
         }
 
-        // Find the item in cart
+        // Find the item index in the cart
         const itemIndex = cart.items.findIndex(item =>
-            item.productId.toString() === productId &&
-            ((!variantId && !item.variantId) ||
-                (variantId && item.variantId && item.variantId.toString() === variantId))
+            item.productId.toString() === productId || String(item.variantId || '') === String(variantId || '')
         );
 
-        if (itemIndex === -1) {
-            return res.status(404).json({
-                success: false,
-                message: 'Item not found in cart'
+        if (itemIndex !== -1) {
+            // Remove the item from cart
+            cart.items.splice(itemIndex, 1);
+
+            // Recalculate cart total
+            cart.cartTotal = cart.items.reduce(
+                (total, item) => total + (item.finalPrice * item.quantity),
+                0
+            );
+
+            // Reapply coupon if it exists
+            if (cart.couponCode) {
+                await this.applyCouponToCart(cart, cart.couponCode);
+            }
+
+            await cart.save();
+
+            return res.status(200).json({
+                success: true,
+                message: 'Item removed from cart',
+                data: cart,
+                userType: isBusinessUser ? 'business' : 'regular'
+            });
+        } else {
+            // Item not found, but cart exists
+            return res.status(200).json({
+                success: true,
+                message: 'Item not found in cart, nothing removed',
+                data: cart,
+                userType: isBusinessUser ? 'business' : 'regular'
             });
         }
-
-        // Remove item
-        cart.items.splice(itemIndex, 1);
-
-        // Recalculate cart total
-        cart.cartTotal = cart.items.reduce((total, item) => {
-            return total + (item.finalPrice * item.quantity);
-        }, 0);
-
-        // Apply discount if coupon exists
-        if (cart.couponCode) {
-            await this.applyCouponToCart(cart, cart.couponCode);
-        }
-
-        await cart.save();
-
-        return res.status(200).json({
-            success: true,
-            message: 'Item removed from cart',
-            data: cart,
-            userType: isBusinessUser ? 'business' : 'regular'
-        });
     } catch (error) {
         console.error('Error removing item from cart:', error);
         return res.status(500).json({
