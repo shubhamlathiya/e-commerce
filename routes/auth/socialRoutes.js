@@ -23,7 +23,7 @@ router.get('/google', (req, res, next) => {
 
     // Encode data in state
     const state = Buffer.from(JSON.stringify({ redirectUri, source })).toString('base64');
-
+    console.log(redirectUri)
     passport.authenticate('google', {
         scope: ['profile', 'email'],
         prompt: 'select_account',
