@@ -232,9 +232,6 @@ exports.addItem = async (req, res) => {
             isBusinessUser = true;
         }
 
-        console.log('Business User:', isBusinessUser);
-        console.log('Session ID:', sessionId);
-
         if (!sessionId) {
             return res.status(400).json({ success: false, message: "Session ID is required" });
         }
@@ -483,9 +480,11 @@ exports.updateItemQuantity = async (req, res) => {
             return total + (item.finalPrice * item.quantity);
         }, 0);
 
-        // Apply discount if coupon exists
+        // Check and auto-remove coupon if conditions are not met after quantity update
+        let couponAutoRemoved = false;
         if (cart.couponCode) {
-            await this.applyCouponToCart(cart, cart.couponCode);
+            const couponCheck = await this.checkAndAutoRemoveCoupon(cart);
+            couponAutoRemoved = couponCheck.removed;
         }
 
         await cart.save();
@@ -494,7 +493,8 @@ exports.updateItemQuantity = async (req, res) => {
             success: true,
             message: 'Item quantity updated',
             data: cart,
-            userType: isBusinessUser ? 'business' : 'regular'
+            userType: isBusinessUser ? 'business' : 'regular',
+            couponAutoRemoved: couponAutoRemoved
         });
     } catch (error) {
         console.error('Error updating cart item:', error);
@@ -542,9 +542,9 @@ exports.removeItem = async (req, res) => {
                 0
             );
 
-            // Reapply coupon if it exists
+            // Check if coupon should be auto-removed after item removal
             if (cart.couponCode) {
-                await this.applyCouponToCart(cart, cart.couponCode);
+                await this.checkAndAutoRemoveCoupon(cart);
             }
 
             await cart.save();
@@ -553,7 +553,8 @@ exports.removeItem = async (req, res) => {
                 success: true,
                 message: 'Item removed from cart',
                 data: cart,
-                userType: isBusinessUser ? 'business' : 'regular'
+                userType: isBusinessUser ? 'business' : 'regular',
+                couponAutoRemoved: !cart.couponCode // Indicate if coupon was auto-removed
             });
         } else {
             // Item not found, but cart exists
@@ -572,6 +573,110 @@ exports.removeItem = async (req, res) => {
             error: error.message
         });
     }
+};
+
+exports.checkAndAutoRemoveCoupon = async (cart) => {
+    try {
+        if (!cart.couponCode) {
+            return { removed: false, reason: null };
+        }
+
+        // Find the applied coupon
+        const coupon = await Coupon.findOne({
+            code: cart.couponCode,
+            status: 'active',
+            startDate: { $lte: new Date() },
+            endDate: { $gte: new Date() }
+        });
+
+        if (!coupon) {
+            // Coupon no longer valid
+            this.removeCouponFromCart(cart, 'COUPON_EXPIRED');
+            return { removed: true, reason: 'COUPON_EXPIRED' };
+        }
+
+        // Calculate current subtotal
+        const subtotal = cart.items.reduce((total, item) => {
+            return total + (item.finalPrice * item.quantity);
+        }, 0);
+
+        // Check minimum order value
+        if (coupon.minOrderAmount && subtotal < coupon.minOrderAmount) {
+            this.removeCouponFromCart(cart, 'MIN_ORDER_VALUE_NOT_MET');
+            return {
+                removed: true,
+                reason: 'MIN_ORDER_VALUE_NOT_MET',
+                requiredAmount: coupon.minOrderAmount,
+                currentAmount: subtotal
+            };
+        }
+
+        // Check category restrictions
+        if (coupon.allowedCategories && coupon.allowedCategories.length > 0) {
+            const hasAllowedCategory = cart.items.some(item => {
+                const itemCategoryIds = item.productId.categoryIds || [];
+                return itemCategoryIds.some(catId =>
+                    coupon.allowedCategories.includes(catId.toString())
+                );
+            });
+
+            if (!hasAllowedCategory) {
+                this.removeCouponFromCart(cart, 'CATEGORY_RESTRICTION');
+                return { removed: true, reason: 'CATEGORY_RESTRICTION' };
+            }
+        }
+
+        // Check if cart is empty
+        if (cart.items.length === 0) {
+            this.removeCouponFromCart(cart, 'EMPTY_CART');
+            return { removed: true, reason: 'EMPTY_CART' };
+        }
+
+        // Recalculate discount based on current cart
+        let discount = 0;
+
+        if (coupon.type === 'percent') {
+            const percentageDiscount = (subtotal * coupon.value) / 100;
+            discount = coupon.maxDiscount && percentageDiscount > coupon.maxDiscount
+                ? coupon.maxDiscount
+                : percentageDiscount;
+        } else if (coupon.type === 'flat') {
+            discount = Math.min(coupon.value, subtotal);
+        }
+
+        // Update cart with new discount and total
+        cart.discount = discount;
+        cart.cartTotal = Math.max(0, subtotal - discount);
+
+        return { removed: false, reason: null };
+
+    } catch (error) {
+        console.error('Error checking coupon validity:', error);
+        // If there's an error checking coupon, remove it for safety
+        this.removeCouponFromCart(cart, 'VALIDATION_ERROR');
+        return { removed: true, reason: 'VALIDATION_ERROR' };
+    }
+};
+
+/**
+ * Helper function to remove coupon from cart
+ */
+exports.removeCouponFromCart = (cart, reason) => {
+    const couponCode = cart.couponCode;
+
+    cart.couponCode = null;
+    cart.discount = 0;
+    cart.discountDetails = null;
+    cart.couponAppliedAt = null;
+
+    // Recalculate total without coupon
+    const subtotal = cart.items.reduce((total, item) => {
+        return total + (item.finalPrice * item.quantity);
+    }, 0);
+
+    cart.cartTotal = subtotal;
+
+    console.log(`Coupon ${couponCode} auto-removed due to: ${reason}`);
 };
 
 /**

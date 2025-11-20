@@ -94,7 +94,7 @@ exports.register = async (req, res) => {
                 expires: expiresAt
             };
 
-            sendVerificationEmail(email, otp);
+            await sendVerificationEmail(email, otp);
         } else {
             if (phone && isValidPhoneNumber(phone)) {
                 const otp = generateOTP();
