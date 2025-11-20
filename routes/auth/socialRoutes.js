@@ -5,6 +5,10 @@ const Device = require('../../models/auth/deviceModel');
 
 const router = express.Router();
 
+const getBaseUrl = (req) => {
+    return req.protocol + "://" + req.get("host");
+};
+
 /**
  * @swagger
  * /api/auth/social/google:
@@ -17,17 +21,24 @@ const router = express.Router();
  *       302:
  *         description: Redirects to Google OAuth consent screen for user login.
  */
-router.get('/google', (req, res, next) => {
-    const redirectUri = req.query.redirect_uri || '';
-    const source = req.query.source || 'web';
+router.get("/google", (req, res, next) => {
+    const redirectUri = req.query.redirect_uri || "";
+    const source = req.query.source || "web";
 
-    // Encode data in state
-    const state = Buffer.from(JSON.stringify({ redirectUri, source })).toString('base64');
-    console.log(redirectUri)
-    passport.authenticate('google', {
-        scope: ['profile', 'email'],
-        prompt: 'select_account',
-        state
+    // Encode redirect data into state
+    const state = Buffer.from(
+        JSON.stringify({ redirectUri, source })
+    ).toString("base64");
+
+    console.log("🚀 GOOGLE LOGIN STARTED");
+    console.log("↳ redirectUri:", redirectUri);
+    console.log("↳ source:", source);
+    console.log("↳ state:", state);
+
+    passport.authenticate("google", {
+        scope: ["profile", "email"],
+        prompt: "select_account",
+        state,
     })(req, res, next);
 });
 
@@ -60,99 +71,68 @@ router.get('/google', (req, res, next) => {
  *       500:
  *         description: Internal server error during social login process.
  */
-router.get('/google/callback', (req, res, next) => {
-    passport.authenticate('google', async (err, user) => {
 
-        // Decode state (redirect info)
-        let redirectUri = null;
-        let source = null;
-        if (req.query.state) {
-            try {
-                const decoded = JSON.parse(
-                    Buffer.from(req.query.state, 'base64').toString()
-                );
-                redirectUri = decoded.redirectUri || null;
-                source = decoded.source || null;
-            } catch (e) {
-                console.log("State decode error:", e);
-            }
-        }
-        console.log("hy")
-        if (err) {
-            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=${encodeURIComponent(err.message)}`;
-            return res.redirect(errorUrl);
-        }
-
-        if (!user) {
-            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=Authentication failed`;
-            return res.redirect(errorUrl);
-        }
-
+router.get(
+    "/google/callback",
+    passport.authenticate("google", { session: false }),
+    async (req, res) => {
         try {
-            const deviceInfo = {
-                userId: user._id,
-                deviceName: req.headers['user-agent'] || 'Unknown Device',
-                ip: req.ip,
-                userAgent: req.headers['user-agent']
-            };
+            const user = req.user;
 
-            const device = await Device.create(deviceInfo);
+            // Decode state
+            const state = req.query.state
+                ? JSON.parse(Buffer.from(req.query.state, "base64").toString())
+                : {};
 
-            const accessToken = generateAccessToken(user);
-            const refreshToken = await generateRefreshToken(user, device._id);
+            const redirectUri = state.redirectUri || "";
+            const source = state.source || "web";
 
-            res.cookie('refreshToken', refreshToken.token, {
-                httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'lax',
-                maxAge: 7 * 24 * 60 * 60 * 1000
-            });
+            console.log("🔄 STATE DECODED");
+            console.log("↳ redirectUri:", redirectUri);
+            console.log("↳ source:", source);
 
-            // Pick best redirect source (state → headers → fallback)
-            const baseUrl = getBaseUrl(req, redirectUri);
-
-            return res.redirect(
-                `${baseUrl}/api/auth/success?accessToken=${accessToken}`
+            // Issue JWT accessToken
+            const accessToken = jwt.sign(
+                { id: user._id, email: user.email },
+                process.env.JWT_SECRET,
+                { expiresIn: "7d" }
             );
 
+            console.log("✅ Token Created:", accessToken);
+
+            /*
+            |--------------------------------------------------------------------------
+            | FINAL REDIRECTION LOGIC
+            |--------------------------------------------------------------------------
+            | WEB → redirect to website success page
+            | MOBILE → redirect to expo:// deep link
+            |--------------------------------------------------------------------------
+            */
+
+            let finalUrl = "";
+
+            if (source === "mobile-app") {
+                // Example:
+                // exp://127.0.0.1:8081/--/auth/callback?accessToken=xxx
+                finalUrl = `${redirectUri}?accessToken=${accessToken}`;
+            } else {
+                // Web fallback
+                // https://yourapp.com/api/auth/success?accessToken=xxx
+                finalUrl = `${getBaseUrl(req)}/api/auth/success?accessToken=${accessToken}`;
+            }
+
+            console.log("🎯 FINAL REDIRECT →", finalUrl);
+
+            return res.redirect(finalUrl);
         } catch (error) {
-            console.error('Social login error:', error);
-            const errorUrl = `${getBaseUrl(req, redirectUri)}/api/auth/error?message=Server error`;
-            return res.redirect(errorUrl);
+            console.error("❌ Google callback error:", error);
+            return res.status(500).json({
+                message: "Google authentication failed",
+                error: error.message,
+            });
         }
-    })(req, res, next);
-});
-
-function getBaseUrl(req, stateRedirect) {
-    console.log(req)
-        // 1. Highest priority: redirectUri from state
-    if (stateRedirect) {
-        return stateRedirect;
     }
-
-    // 2. redirectUrl query
-    if (req.query.redirectUrl) {
-        return req.query.redirectUrl;
-    }
-
-    // 3. x-redirect-url header
-    if (req.headers['x-redirect-url']) {
-        return req.headers['x-redirect-url'];
-    }
-
-    // 4. referer
-    if (req.headers.referer) {
-        return req.headers.referer;
-    }
-
-    // 5. origin
-    if (req.headers.origin) {
-        return req.headers.origin;
-    }
-
-    // 6. final fallback
-    return process.env.FRONTEND_URL || 'http://localhost:8000';
-}
+);
 
 
 /**
