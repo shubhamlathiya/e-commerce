@@ -13,13 +13,11 @@ exports.getCart = async (req, res) => {
     try {
         const { sessionId, addressId } = req.query;
         const userId = req.user ? req.user.id : null;
+
         // Detect business user
-        let isBusinessUser = false;
-        if (req.user && req.user.loginType === "business") {
-            isBusinessUser = true;
-        } else if (req.query.loginType === "business") {
-            isBusinessUser = true;
-        }
+        const isBusinessUser =
+            (req.user && req.user.loginType === "business") ||
+            req.query.loginType === "business";
 
         if (!sessionId && !userId) {
             return res.status(400).json({
@@ -34,7 +32,6 @@ exports.getCart = async (req, res) => {
                 : sessionId
                     ? { sessionId }
                     : { userId };
-
 
         const cart = await Cart.findOne(query)
             .populate({
@@ -53,7 +50,7 @@ exports.getCart = async (req, res) => {
             return res.status(404).json({ success: false, message: "Cart not found" });
         }
 
-        if (!cart.items.length) {
+        if (!cart.items?.length) {
             return res.status(200).json({
                 success: true,
                 message: "Cart is empty",
@@ -61,17 +58,16 @@ exports.getCart = async (req, res) => {
             });
         }
 
+        // Resolve address safely
         let resolvedAddress = null;
 
-        if (addressId && userId) {
-            resolvedAddress = await UserAddress.findOne({ _id: addressId, userId }).lean();
-        }
-
-        if (!resolvedAddress && userId) {
-            resolvedAddress = await UserAddress.findOne({
-                userId,
-                isDefault: true
-            }).lean();
+        if (userId) {
+            if (addressId) {
+                resolvedAddress = await UserAddress.findOne({ _id: addressId, userId }).lean();
+            }
+            if (!resolvedAddress) {
+                resolvedAddress = await UserAddress.findOne({ userId, isDefault: true }).lean();
+            }
         }
 
         if (resolvedAddress) {
@@ -82,31 +78,35 @@ exports.getCart = async (req, res) => {
             };
         }
 
-        // console.log("Resolved Address:", resolvedAddress);
-
+        // Determine shipping zone
         let marketFeesValue = 0;
         let zone = null;
 
+        if (resolvedAddress) {
+            zone = await ShippingZone.findOne({ pincodes: resolvedAddress.pincode }).lean();
 
-        zone = await ShippingZone.findOne({
-            pincodes: resolvedAddress.pincode
-        }).lean();
+            if (!zone) {
+                zone = await ShippingZone.findOne({
+                    states: {
+                        $in: [
+                            resolvedAddress.state,
+                            resolvedAddress.state?.charAt(0).toUpperCase() + resolvedAddress.state?.slice(1)
+                        ]
+                    }
+                }).lean();
+            }
 
-        if (!zone) {
-            // 2) Try exact STATE match (case-insensitive)
-            zone = await ShippingZone.findOne({
-                states: { $in: [ resolvedAddress.state, resolvedAddress.state.charAt(0).toUpperCase() + resolvedAddress.state.slice(1) ] }
-            }).lean();
+            if (!zone) {
+                zone = await ShippingZone.findOne({
+                    countries: {
+                        $in: [
+                            resolvedAddress.country,
+                            resolvedAddress.country?.charAt(0).toUpperCase() + resolvedAddress.country?.slice(1)
+                        ]
+                    }
+                }).lean();
+            }
         }
-
-        if (!zone) {
-            // 3) Try exact COUNTRY match (case-insensitive)
-            zone = await ShippingZone.findOne({
-                countries: { $in: [ resolvedAddress.country, resolvedAddress.country.charAt(0).toUpperCase() + resolvedAddress.country.slice(1) ] }
-            }).lean();
-        }
-
-        console.log("Matched Zone:", zone);
 
         if (zone) {
             marketFeesValue = Number(zone.marketFees || 0);
@@ -115,18 +115,14 @@ exports.getCart = async (req, res) => {
         let subtotal = 0;
         let shippingTotal = 0;
 
+        // Map cart items
         const items = await Promise.all(
             cart.items.map(async (item) => {
                 const product = item.productId || {};
                 const variant = item.variantId || {};
 
-                // Primary image
-                const image =
-                    variant.images?.[0] ||
-                    product.images?.[0] ||
-                    null;
+                const image = variant.images?.[0] || product.images?.[0] || null;
 
-                // BUSINESS TIER PRICING
                 let unitPrice =
                     item.finalPrice ??
                     variant.price ??
@@ -134,6 +130,7 @@ exports.getCart = async (req, res) => {
                     product.price ??
                     0;
 
+                // Business tier pricing
                 if (isBusinessUser) {
                     const tier = await TierPricing.findOne({
                         productId: item.productId?._id,
@@ -142,9 +139,7 @@ exports.getCart = async (req, res) => {
                         maxQty: { $gte: item.quantity }
                     }).lean();
 
-                    if (tier) {
-                        unitPrice = tier.price;
-                    }
+                    if (tier) unitPrice = tier.price;
                 }
 
                 const finalPrice = unitPrice * item.quantity;
@@ -176,9 +171,7 @@ exports.getCart = async (req, res) => {
             })
         );
 
-        // -------------------------------------------------------
-        // TOTALS (following summary logic)
-        // -------------------------------------------------------
+        // Totals
         const discount = Number(cart.discount || 0);
         const taxRate = 0.05;
         const tax = subtotal * taxRate;
