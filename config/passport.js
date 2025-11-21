@@ -9,12 +9,13 @@ const Role = require('../models/auth/roleModel');
 /**
  * Initialize and configure Passport strategies
  */
+
 module.exports = function () {
     // Google OAuth Strategy
     passport.use(new GoogleStrategy({
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_REDIRECT_URI,
+        callbackURL: process.env.GOOGLE_REDIRECT_URI_WEB,
         passReqToCallback: true
     }, async (req, accessToken, refreshToken, profile, done) => {
         try {
@@ -90,7 +91,7 @@ module.exports = function () {
                     });
                 }
             }
-
+            console.log(user)
             return done(null, user);
         } catch (error) {
             return done(error, null);
